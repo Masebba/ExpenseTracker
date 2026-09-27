@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isUser(userId) { return signedIn() && request.auth.uid == userId; }
+    function hasMembership(orgId) {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(orgId))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(orgId)).data.status == 'active';
+    }
+    function activeMember(orgId) { return hasMembership(orgId); }
+    function role(orgId) {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(orgId)).data.role;
+    }
+    function canEdit(orgId) { return activeMember(orgId) && role(orgId) in ['owner', 'admin', 'editor']; }
+    function canManage(orgId) { return activeMember(orgId) && role(orgId) in ['owner', 'admin']; }
+    function isDeveloper() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.developerAdmin == true;
+    }
+
+    match /users/{userId} {
+      allow read: if isUser(userId);
+      allow create, update, delete: if isUser(userId);
+      match /{collectionName}/{document=**} {
+        allow read, write: if collectionName != 'memberships' && isUser(userId);
+      }
+      match /memberships/{orgId} {
+        allow read: if isUser(userId) || (signedIn() && hasMembership(orgId));
+        allow create: if signedIn() && request.resource.data.status == 'active'
+          && request.resource.data.role in ['owner', 'admin', 'editor', 'viewer']
+          && request.resource.data.organizationId == orgId
+          && (isUser(userId)
+            ? ((request.resource.data.role == 'owner' && request.resource.data.email == request.auth.token.email && get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == userId)
+              || (request.resource.data.email == request.auth.token.email
+              && exists(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email))
+              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email)).data.status == 'pending'
+              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email)).data.role == request.resource.data.role))
+            : (request.auth.uid == userId
+              && exists(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email))
+              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email)).data.status == 'pending'
+              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email)).data.email == request.auth.token.email
+              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email)).data.role == request.resource.data.role));
+        allow update: if signedIn() && resource.data.role != 'owner'
+          && activeMember(resource.data.organizationId) && role(resource.data.organizationId) == 'owner'
+          && request.resource.data.organizationId == resource.data.organizationId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'status', 'updatedAt']);
+        allow delete: if signedIn() && resource.data.role != 'owner'
+          && activeMember(resource.data.organizationId) && role(resource.data.organizationId) == 'owner';
+      }
+    }
+
+    match /organizations/{orgId} {
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow read: if activeMember(orgId);
+      allow update: if activeMember(orgId) && role(orgId) == 'owner' && request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if activeMember(orgId) && role(orgId) == 'owner';
+      match /{collectionName}/{document=**} {
+        allow read: if activeMember(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories'];
+      allow create: if canEdit(orgId)
+          && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories']
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories'];
+        allow delete: if canEdit(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories'];
+      }
+      match /invitations/{email} {
+        allow read: if (signedIn() && resource.data.email == request.auth.token.email)
+          || canManage(orgId);
+        allow delete: if signedIn() && resource.data.email == request.auth.token.email;
+        allow create, update: if canManage(orgId)
+          && request.resource.data.organizationId == orgId
+          && email == request.resource.data.email
+          && request.resource.data.email is string
+          && request.resource.data.role in ['admin', 'editor', 'viewer'];
+      }
+    }
+
+    // Allows owners/admins to query memberships across user documents for their organisation.
+    match /{path=**}/memberships/{membershipId} {
+      allow list: if signedIn() && resource.data.organizationId is string
+        && activeMember(resource.data.organizationId)
+        && role(resource.data.organizationId) in ['owner', 'admin'];
+    }
+
+    match /advertisements/{advertisementId} {
+      allow read: if true;
+      allow create: if isDeveloper()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.publisherType == 'developer';
+      allow update, delete: if isDeveloper()
+        && resource.data.createdBy == request.auth.uid
+        && resource.data.publisherType == 'developer';
+    }
+  }
+}
