@@ -1,6 +1,6 @@
 // screens/SignupScreen.js
 import React, { useState, useContext } from 'react';
-import { StyleSheet, View, Image, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, Image, TouchableOpacity, Alert } from 'react-native';
 import { TextInput, Button, Text, Title } from 'react-native-paper';
 import { AuthContext } from '../AuthContext';
 
@@ -22,22 +22,27 @@ export default function SignupScreen({ navigation }) {
       return regex.test(email);
     };
 
+    if (!name.trim()) {
+      Alert.alert('Name required', 'Enter your name to create an account.');
+      return;
+    }
+    if (password.length < 8) {
+      Alert.alert('Password too short', 'Use at least 8 characters.');
+      return;
+    }
     if (password !== confirmPassword) {
-      alert('Passwords do not match');
+      Alert.alert('Passwords do not match');
       return;
     }
     const trimmedEmail = email.trim();
     if (!isValidEmail(trimmedEmail)) {
-      alert('Please enter a valid email address');
+      Alert.alert('Invalid email', 'Please enter a valid email address.');
       return;
     }
     // Pass the display name and a default photo URL
     signUp(trimmedEmail, password, name, telephone)
-      .then((userCredential) => {
-        console.log('Registered with:', userCredential.user.email);
-      })
       .catch((error) => {
-        alert(error.message);
+        Alert.alert('Could not create account', error.message || 'Try again.');
       });
   };
 

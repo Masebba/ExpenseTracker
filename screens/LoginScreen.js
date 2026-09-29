@@ -1,6 +1,6 @@
 // screens/LoginScreen.js
 import React, { useState, useContext } from 'react';
-import { View, StyleSheet, Image } from 'react-native';
+import { View, StyleSheet, Image, Alert } from 'react-native';
 import { TextInput, Button, Title, Text } from 'react-native-paper';
 import { AuthContext } from '../AuthContext';
 
@@ -13,10 +13,10 @@ export default function LoginScreen({ navigation }) {
   const handleLogin = () => {
     signIn(email, password)
       .then((userCredential) => {
-        console.log("Logged in user:", userCredential.user);
+        return userCredential;
       })
       .catch((error) => {
-        alert(error.message);
+        Alert.alert('Could not sign in', error.message || 'Check your details and try again.');
       });
   };
 

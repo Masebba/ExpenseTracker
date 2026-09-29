@@ -1,9 +1,12 @@
 import React, { createContext, useEffect, useState } from 'react';
-import { createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail, signInWithEmailAndPassword, signOut as firebaseSignOut, updateProfile } from 'firebase/auth';
-import { doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, sendPasswordResetEmail, signInWithEmailAndPassword, signOut as firebaseSignOut, updateProfile } from 'firebase/auth';
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { auth, firestore } from './firebase';
-import { acceptOrganizationInvitation, createOrganization, inviteOrganizationMember, listenToInvitations, listenToMemberships, listOrganizationMembers, removeOrganizationMember, updateMemberRole } from './services/organizations';
+import { acceptOrganizationInvitation, createOrganization, inviteOrganizationMember, listenToInvitations, listenToMemberships, listOrganizationMembers, removeOrganizationMember, updateMemberRole, updateOrganizationDetails } from './services/organizations';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import * as FileSystem from 'expo-file-system/legacy';
 
 export const AuthContext = createContext();
 
@@ -12,10 +15,13 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [memberships, setMemberships] = useState([]);
   const [invitations, setInvitations] = useState([]);
+  const [invitationSyncError, setInvitationSyncError] = useState(null);
   const [activeWorkspace, setActiveWorkspaceState] = useState({ id: 'personal', name: 'Personal', type: 'personal', role: 'owner' });
   const [isDeveloper, setIsDeveloper] = useState(false);
   const [developerAccessInfo, setDeveloperAccessInfo] = useState(null);
   const [profileImage, setProfileImage] = useState(null);
+  const [businessProfile, setBusinessProfile] = useState({});
+  const [personalDetails, setPersonalDetails] = useState({});
 
   useEffect(() => onAuthStateChanged(auth, async (firebaseUser) => {
     setUser(firebaseUser || null);
@@ -23,6 +29,8 @@ export const AuthProvider = ({ children }) => {
     setIsDeveloper(false);
     setDeveloperAccessInfo(null);
     setProfileImage(null);
+    setBusinessProfile({});
+    setPersonalDetails({});
     setActiveWorkspaceState({ id: 'personal', name: 'Personal', type: 'personal', role: 'owner' });
     if (firebaseUser) {
       await ensureProfile(firebaseUser);
@@ -38,6 +46,8 @@ export const AuthProvider = ({ children }) => {
     if (!user?.uid) return undefined;
     return onSnapshot(doc(firestore, 'users', user.uid), (profile) => {
       const developerAdmin = profile.exists() && profile.data()?.developerAdmin === true;
+      setBusinessProfile(profile.exists() ? (profile.data()?.businessProfile || {}) : {});
+      setPersonalDetails(profile.exists() ? (profile.data()?.personalDetails || {}) : {});
       setIsDeveloper(developerAdmin);
       setDeveloperAccessInfo({ uid: user.uid, email: user.email || null, developerAdmin });
     }, (error) => {
@@ -75,7 +85,11 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     if (!user?.email) return undefined;
-    return listenToInvitations(user.email, (items) => setInvitations(items), (error) => console.warn('Invitation sync failed:', error?.message || error));
+    setInvitationSyncError(null);
+    return listenToInvitations(user.email, (items) => { setInvitations(items); setInvitationSyncError(null); }, (error) => {
+      console.warn('Invitation sync failed:', error?.message || error);
+      setInvitationSyncError(error?.message || 'Firestore denied the invitation query.');
+    });
   }, [user?.email]);
 
   const syncProfile = async (firebaseUser, extra = {}) => {
@@ -124,11 +138,107 @@ export const AuthProvider = ({ children }) => {
   const signOut = () => firebaseSignOut(auth);
   const resetPassword = (email) => sendPasswordResetEmail(auth, email.trim());
 
-  const createCompany = async (name, type = 'company') => {
-    const workspace = await createOrganization(user?.uid, { name, type });
+  const exportMyData = async () => {
+    if (!user?.uid) throw new Error('Sign in to export your data.');
+    const keys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(`expenseTracker.${user.uid}.`));
+    const localEntries = await AsyncStorage.multiGet(keys);
+    const localData = Object.fromEntries(localEntries.map(([key, raw]) => {
+      try { return [key, raw == null ? null : JSON.parse(raw)]; } catch { return [key, raw]; }
+    }));
+    const currencyKey = `expenseTracker.currency.${user.uid}`;
+    const currencyRaw = await AsyncStorage.getItem(currencyKey);
+    if (currencyRaw != null) {
+      try { localData[currencyKey] = JSON.parse(currencyRaw); } catch { localData[currencyKey] = currencyRaw; }
+    }
+    const cloudData = {};
+    const organizationData = {};
+    const cloudCollections = ['transactions', 'products', 'productCategories', 'sales', 'orders', 'customers', 'suppliers', 'invoices', 'purchases'];
+    try {
+      const profile = await getDoc(doc(firestore, 'users', user.uid));
+      cloudData.profile = profile.exists() ? profile.data() : null;
+    } catch { cloudData.profile = null; }
+    for (const name of cloudCollections) {
+      try {
+        const records = await getDocs(collection(firestore, 'users', user.uid, name));
+        cloudData[name] = records.docs.map((item) => ({ id: item.id, ...item.data() }));
+      } catch { cloudData[name] = null; }
+    }
+    try {
+      const memberships = await getDocs(collection(firestore, 'users', user.uid, 'memberships'));
+      cloudData.memberships = memberships.docs.map((item) => ({ id: item.id, ...item.data() }));
+      for (const membership of memberships.docs.filter((item) => item.data().status === 'active')) {
+        organizationData[membership.id] = {};
+        for (const name of cloudCollections) {
+          try {
+            const records = await getDocs(collection(firestore, 'organizations', membership.id, name));
+            organizationData[membership.id][name] = records.docs.map((item) => ({ id: item.id, ...item.data() }));
+          } catch { organizationData[membership.id][name] = null; }
+        }
+      }
+    } catch { cloudData.memberships = null; }
+    return JSON.stringify({ format: 'ExpenseTracker export', version: 1, exportedAt: new Date().toISOString(), uid: user.uid, localData, cloudData, organizationData }, null, 2);
+  };
+
+  const deleteMyAccount = async (password) => {
+    const current = auth.currentUser;
+    if (!current) throw new Error('Sign in to delete your account.');
+    if (!current.email || !password) throw new Error('Enter your account password to confirm deletion.');
+    try { await reauthenticateWithCredential(current, EmailAuthProvider.credential(current.email, password)); }
+    catch { throw new Error('Password confirmation failed. Check your password and try again.'); }
+    const clearLocalAccountData = async () => {
+      const keys = (await AsyncStorage.getAllKeys()).filter((key) => key.includes(current.uid));
+      if (keys.length) await AsyncStorage.multiRemove(keys);
+      await SecureStore.deleteItemAsync(`expenseTracker.appPin.${current.uid}`).catch(() => {});
+      const profileImagePath = `${FileSystem.documentDirectory}ExpenseTracker/images/${current.uid}-profile.jpg`;
+      await FileSystem.deleteAsync(profileImagePath, { idempotent: true }).catch(() => {});
+    };
+    const membershipsSnapshot = await getDocs(collection(firestore, 'users', current.uid, 'memberships'));
+    const ownerWorkspaces = membershipsSnapshot.docs.filter((item) => item.data().role === 'owner' && item.data().status === 'active');
+    if (ownerWorkspaces.length) throw new Error('Transfer ownership or delete each organization you own before deleting this account.');
+    let deletionResult;
+    try {
+      const deleteAccount = httpsCallable(getFunctions(auth.app), 'deleteMyAccount');
+      deletionResult = await deleteAccount({});
+    } catch (error) {
+      let accountAlreadyDeleted = false;
+      try { await current.reload(); }
+      catch (reloadError) { accountAlreadyDeleted = reloadError?.code === 'auth/user-not-found'; }
+      if (accountAlreadyDeleted) {
+        await firebaseSignOut(auth).catch(() => {});
+        await clearLocalAccountData();
+        return;
+      }
+      if (error?.code === 'functions/not-found' || error?.code === 'functions/unavailable') {
+        throw new Error('Secure account deletion is not deployed for this Firebase project yet. No account data was removed. Please contact support or try again after the deletion service is deployed.');
+      }
+      if (error?.code === 'functions/failed-precondition') throw new Error(error.message || 'Transfer ownership of each active organization before deleting this account.');
+      throw new Error(`Account deletion did not finish. Your sign-in is still active so you can retry safely. ${error?.message || ''}`.trim());
+    }
+    if (deletionResult?.data?.deleted !== true) throw new Error('The deletion service did not confirm completion. Your sign-in is still active so you can retry.');
+    await firebaseSignOut(auth);
+    await clearLocalAccountData();
+  };
+
+  const createCompany = async (name, type = 'company', details = {}) => {
+    const workspace = await createOrganization(user?.uid, { name, type, details });
     setMemberships((current) => [...current.filter((item) => item.id !== workspace.id), workspace]);
     setActiveWorkspaceState(workspace);
     return workspace;
+  };
+  const updatePersonalBusinessProfile = async (details) => {
+    if (!user?.uid) throw new Error('Sign in to save business details.');
+    await setDoc(doc(firestore, 'users', user.uid), { businessProfile: details, updatedAt: new Date().toISOString() }, { merge: true });
+    setBusinessProfile(details);
+  };
+  const updatePersonalDetails = async (details) => {
+    if (!user?.uid) throw new Error('Sign in to save your details.');
+    await setDoc(doc(firestore, 'users', user.uid), { personalDetails: details, updatedAt: new Date().toISOString() }, { merge: true });
+    setPersonalDetails(details);
+  };
+  const updateWorkspaceDetails = async (organizationId, details) => {
+    await updateOrganizationDetails(organizationId, details);
+    setMemberships((items) => items.map((item) => item.id === organizationId ? { ...item, details } : item));
+    setActiveWorkspaceState((item) => item.id === organizationId ? { ...item, details } : item);
   };
 
   const inviteMember = (organizationId, email, role) => inviteOrganizationMember(user?.uid, organizationId, email, role);
@@ -193,5 +303,5 @@ export const AuthProvider = ({ children }) => {
     setUser(Object.assign(Object.create(Object.getPrototypeOf(current)), current, updates));
   };
 
-  return <AuthContext.Provider value={{ user, memberships, invitations, acceptInvitation, activeWorkspace, setActiveWorkspace, isDeveloper, developerAccessInfo, refreshDeveloperAccess, profileImage, updateProfileImage, createCompany, inviteMember, getMembers, changeMemberRole, removeMember, updateWorkspacePhoto, signIn, signUp, signOut, resetPassword, updateUserProfile, updateUserData }}>{!loading && children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, memberships, invitations, invitationSyncError, acceptInvitation, activeWorkspace, setActiveWorkspace, isDeveloper, developerAccessInfo, refreshDeveloperAccess, profileImage, updateProfileImage, personalDetails, updatePersonalDetails, businessProfile, updatePersonalBusinessProfile, updateWorkspaceDetails, createCompany, inviteMember, getMembers, changeMemberRole, removeMember, updateWorkspacePhoto, signIn, signUp, signOut, resetPassword, exportMyData, deleteMyAccount, updateUserProfile, updateUserData }}>{!loading && children}</AuthContext.Provider>;
 };

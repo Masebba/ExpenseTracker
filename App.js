@@ -18,6 +18,8 @@ import { OrdersProvider } from "./OrdersContext";
 import { SalesProvider } from "./SalesContext";
 import { CurrencyProvider } from "./CurrencyContext";
 import { AppFeaturesProvider } from "./AppFeaturesContext";
+import { BusinessRecordsProvider } from "./BusinessRecordsContext";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import HomeScreen from "./screens/HomeScreen";
 import TransactionsScreen from "./screens/TransactionsScreen";
@@ -61,11 +63,12 @@ const combinedTheme = {
 };
 
 function AppTabs() {
+  const insets = useSafeAreaInsets();
   return (
     <BottomTab.Navigator
       screenOptions={({ route }) => ({
-        headerShown: false, // Using custom headers via stack navigators
-        tabBarStyle: { height: 64, marginBottom: 44, marginHorizontal: 16, borderRadius: 22, backgroundColor: '#ffffff', elevation: 8, paddingBottom: 9, paddingTop: 9, borderTopWidth: 0 },
+        headerShown: false,
+        tabBarStyle: { height: 58 + insets.bottom, paddingBottom: Math.max(insets.bottom, 6), paddingTop: 6, backgroundColor: '#ffffff', elevation: 8, borderTopWidth: 0 },
         tabBarLabelStyle: { fontSize: 10, marginTop: -2, fontWeight: '600' },
         tabBarIcon: ({ color, size }) => {
           let iconName;
@@ -89,8 +92,8 @@ function AppTabs() {
       <BottomTab.Screen name="Home" component={HomeScreen} />
       <BottomTab.Screen name="Transactions" component={TransactionsScreen} />
       <BottomTab.Screen name="Report" component={ReportsScreen} />
-      <BottomTab.Screen name="Settings" component={SettingsScreen} />
-      <BottomTab.Screen name="Workspaces" component={WorkspacesScreen} options={{ tabBarLabel: 'Workspaces', tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="domain" color={color} size={size} /> }} />
+      <BottomTab.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
+      <BottomTab.Screen name="Workspaces" component={WorkspacesScreen} options={{ headerShown: false, tabBarLabel: 'Workspaces', tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="domain" color={color} size={size} /> }} />
     </BottomTab.Navigator>
   );
 }
@@ -102,7 +105,7 @@ function AppNavigator() {
     <NavigationContainer theme={combinedTheme} linking={user ? linking : undefined}>
       {user ? <RootStack.Navigator screenOptions={{ headerShown: false }}>
         <RootStack.Screen name="Main" component={AppTabs} />
-        {isDeveloper && <RootStack.Screen name="DeveloperStudio" component={DeveloperStudioScreen} options={{ headerShown: true, title: 'Developer Studio' }} />}
+        {isDeveloper && <RootStack.Screen name="DeveloperStudio" component={DeveloperStudioScreen} options={{ headerShown: true, title: 'Developer Studio', headerStyle: { backgroundColor: '#2f7040' }, headerTintColor: '#ffffff', headerTitleStyle: { color: '#ffffff', fontWeight: '700' } }} />}
       </RootStack.Navigator> : <AuthNavigator />}
     </NavigationContainer>
   );
@@ -111,21 +114,21 @@ function AppNavigator() {
 export default function App() {
   return (
     <PaperProvider theme={customPaperTheme}>
-      <AuthProvider>
+      <SafeAreaProvider><AuthProvider>
         <AppFeaturesProvider>
           <CurrencyProvider>
             <ProductsProvider>
               <SalesProvider>
                 <OrdersProvider>
                   <TransactionsProvider>
-                    <AppNavigator />
+                    <BusinessRecordsProvider><AppNavigator /></BusinessRecordsProvider>
                   </TransactionsProvider>
                 </OrdersProvider>
               </SalesProvider>
             </ProductsProvider>
           </CurrencyProvider>
         </AppFeaturesProvider>
-      </AuthProvider>
+      </AuthProvider></SafeAreaProvider>
     </PaperProvider>
   );
 }

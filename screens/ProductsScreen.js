@@ -12,9 +12,6 @@ export default function ProductsScreen() {
     const { products, setProducts, categories: categoriesList, addCategory, updateCategory, deleteCategory } = useContext(ProductsContext);
 
     const { currency } = useContext(CurrencyContext); // Destructure 'currency'
-    // log the currency for debugging:
-    console.log("Currency value:", currency);
-
     // Local state for adding/editing product
     const [editingProduct, setEditingProduct] = useState(null);
     const [barcode, setBarcode] = useState('');
@@ -26,6 +23,8 @@ export default function ProductsScreen() {
 
     const [newCategoryInput, setNewCategoryInput] = useState('');
     const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+    const [search, setSearch] = useState('');
+    const [categoryFilter, setCategoryFilter] = useState('All');
 
     // Modal visibility for product add/edit and barcode scanning
     const [productModalVisible, setProductModalVisible] = useState(false);
@@ -50,7 +49,7 @@ export default function ProductsScreen() {
         setEditingProduct(null);
     };
 
-    const handleAddOrEdit = () => {
+    const handleAddOrEdit = async () => {
         const numericPrice = Number(price);
         const numericBuyingPrice = Number(buyingPrice);
         const numericStock = Number(stock);
@@ -58,20 +57,22 @@ export default function ProductsScreen() {
             Alert.alert('Invalid product', 'Enter a name, valid prices, a whole-number stock value of 0 or more, and a category.');
             return;
         }
+        try {
         if (editingProduct) {
-            setProducts(products.map(prod => prod.id === editingProduct.id ? { ...prod, barcode: barcode.trim(), name: name.trim(), price: numericPrice, buyingPrice: numericBuyingPrice, stock: numericStock, category: category.trim(), updatedAt: new Date().toISOString() } : prod));
+            await setProducts(products.map(prod => prod.id === editingProduct.id ? { ...prod, barcode: barcode.trim(), name: name.trim(), price: numericPrice, buyingPrice: numericBuyingPrice, stock: numericStock, category: category.trim(), updatedAt: new Date().toISOString() } : prod));
         } else {
             const duplicateBarcode = barcode.trim() && products.some((prod) => prod.barcode === barcode.trim());
             if (duplicateBarcode) { Alert.alert('Duplicate barcode', 'A product with this barcode already exists.'); return; }
-            setProducts([...products, { id: `prod_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, barcode: barcode.trim(), name: name.trim(), price: numericPrice, buyingPrice: numericBuyingPrice, stock: numericStock, category: category.trim(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]);
+            await setProducts([...products, { id: `prod_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, barcode: barcode.trim(), name: name.trim(), price: numericPrice, buyingPrice: numericBuyingPrice, stock: numericStock, category: category.trim(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]);
         }
         resetForm();
         setProductModalVisible(false);
+        } catch (error) { Alert.alert('Could not save product', error.message || 'Try again.'); }
     };
 
     const handleDelete = (id) => {
         const product = products.find((p) => p.id === id);
-        Alert.alert('Delete product', `Delete ${product?.name || 'this product'}? Historical sales are retained.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => setProducts(products.filter(prod => prod.id !== id)) }]);
+        Alert.alert('Delete product', `Delete ${product?.name || 'this product'}? Historical sales are retained.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => setProducts(products.filter(prod => prod.id !== id)).catch((error) => Alert.alert('Could not delete product', error.message)) }]);
     };
 
     const renderProduct = ({ item }) => (
@@ -287,8 +288,10 @@ export default function ProductsScreen() {
             {renderCategoryModal()}
             {renderProductModal()}
             {renderScannerModal()}
+            <TextInput label="Search products or barcodes" value={search} onChangeText={setSearch} style={styles.input} />
+            <View style={styles.filters}><Button compact mode={categoryFilter === 'All' ? 'contained' : 'outlined'} onPress={() => setCategoryFilter('All')}>All</Button>{categoriesList.map((cat) => <Button compact key={cat} mode={categoryFilter === cat ? 'contained' : 'outlined'} onPress={() => setCategoryFilter(cat)}>{cat}</Button>)}</View>
             <FlatList
-                data={products}
+                data={products.filter((product) => (categoryFilter === 'All' || product.category === categoryFilter) && `${product.name} ${product.barcode || ''} ${product.category || ''}`.toLowerCase().includes(search.trim().toLowerCase()))}
                 keyExtractor={(item) => item.id}
                 renderItem={renderProduct}
             />
@@ -317,6 +320,7 @@ const styles = StyleSheet.create({
     productRow: { flexDirection: 'row', justifyContent: 'space-between' },
     productDetails: { flex: 1 },
     productActions: { justifyContent: 'center' },
+    filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, marginBottom: 7 },
     productName: { fontWeight: 'bold', marginBottom: 2 },
     categoryButton: {
         justifyContent: 'center',

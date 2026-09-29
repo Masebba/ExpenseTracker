@@ -43,7 +43,8 @@ export const currencyFromCode = (code, fallback = { symbol: 'USh', code: 'UGX' }
 export const formatMoney = (amount, currency = { symbol: 'Ush', code: 'UGX' }) => {
   const safeAmount = Number.isFinite(Number(amount)) ? Number(amount) : 0;
   const symbol = currency?.symbol || currency?.code || 'UGX';
-  return `${symbol} ${safeAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const digits = ['UGX', 'JPY', 'RWF', 'BIF'].includes(currency?.code) ? 0 : 2;
+  return `${symbol} ${safeAmount.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 };
 
 export const periodStartEnd = (period, now = new Date()) => {
@@ -96,6 +97,10 @@ export const saveJson = async (key, value) => {
   try {
     const json = JSON.stringify(value);
     await AsyncStorage.setItem(key, json);
+    const ownerId = key.startsWith('expenseTracker.') ? key.split('.')[1] : '';
+    if (ownerId && !['guest', 'currency', 'cloudSync', 'externalBackup'].includes(ownerId)) {
+      import('../services/externalBackup').then(({ scheduleExternalBackup }) => scheduleExternalBackup(ownerId)).catch(() => {});
+    }
     const root = FileSystem.documentDirectory;
     if (root) {
       const directory = `${root}ExpenseTracker/`;

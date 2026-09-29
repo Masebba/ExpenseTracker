@@ -1,21 +1,27 @@
-import { addDoc, collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { addDoc, collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { firestore } from '../firebase';
 import { auth } from '../firebase';
 
 const membershipsFor = (uid) => collection(firestore, 'users', uid, 'memberships');
 const membershipRef = (uid, orgId) => doc(firestore, 'users', uid, 'memberships', orgId);
 
-export const createOrganization = async (uid, { name, type }) => {
+export const createOrganization = async (uid, { name, type, details = {} }) => {
   const cleanName = String(name || '').trim();
   if (!uid || !cleanName) throw new Error('Enter an organisation name.');
   const org = await addDoc(collection(firestore, 'organizations'), {
-    name: cleanName, type: type === 'company' ? 'company' : 'organization', ownerId: uid,
+    name: cleanName, type: type === 'company' ? 'company' : 'organization', ownerId: uid, details,
     createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
   });
   await setDoc(membershipRef(uid, org.id), {
-    organizationId: org.id, organizationName: cleanName, email: auth.currentUser?.email || '', displayName: auth.currentUser?.displayName || '', role: 'owner', status: 'active', createdAt: serverTimestamp(),
+    organizationId: org.id, organizationName: cleanName, email: auth.currentUser?.email?.trim().toLowerCase() || '', displayName: auth.currentUser?.displayName || '', role: 'owner', status: 'active', createdAt: serverTimestamp(),
   });
-  return { id: org.id, name: cleanName, type: type === 'company' ? 'company' : 'organization', role: 'owner', status: 'active' };
+  return { id: org.id, name: cleanName, type: type === 'company' ? 'company' : 'organization', details, role: 'owner', status: 'active' };
+};
+
+export const updateOrganizationDetails = async (organizationId, details) => {
+  if (!organizationId) throw new Error('Choose an organisation first.');
+  await updateDoc(doc(firestore, 'organizations', organizationId), { details, updatedAt: serverTimestamp() });
+  return details;
 };
 
 export const listenToMemberships = (uid, callback, onError) => onSnapshot(membershipsFor(uid), async (snapshot) => {

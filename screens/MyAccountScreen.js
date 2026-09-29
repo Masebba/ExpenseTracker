@@ -1,6 +1,6 @@
 // screens/MyAccountScreen.js
 import React, { useContext, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, KeyboardAvoidingView } from 'react-native';
 import { Title, Text, Button } from 'react-native-paper';
 import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
@@ -28,8 +28,9 @@ export default function MyAccountScreen() {
     const totalStyle = netTotal >= 0 ? styles.totalPositive : styles.totalNegative;
 
     return (
-        <View style={styles.container}>
+        <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
             <Title style={styles.title}>Account summary</Title>
+            <Text style={styles.period}>Your cash flow · {filter === 'all' ? 'All time' : ({daily:'Today',weekly:'This week',monthly:'This month',yearly:'This year'}[filter])}</Text>
 
             {/* Filter Buttons Container */}
             <View style={styles.filterContainer}>
@@ -63,12 +64,13 @@ export default function MyAccountScreen() {
             <View style={styles.summaryCard}>
                 <Text style={styles.label}>Net total</Text><Text style={[styles.summary, totalStyle]}>{currency.symbol} {netTotal.toFixed(2)}</Text>
             </View>
-        </View>
+            <View style={styles.insight}><Text style={styles.insightTitle}>Cash flow</Text><Text style={styles.insightText}>{netTotal >= 0 ? 'Income is ahead of expenses' : 'Expenses are ahead of income'} by {currency.symbol} {Math.abs(netTotal).toFixed(2)} for this period.</Text></View>
+        </ScrollView></KeyboardAvoidingView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, paddingHorizontal: 18, paddingTop: 26, paddingBottom: 112, backgroundColor: '#f4f6f3' },
+    container: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 100, backgroundColor: '#f4f6f3' },
     title: { fontSize: 24, color: '#24432b', marginBottom: 12 },
     pageTitle: {
         textAlign: 'center',
@@ -86,7 +88,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginVertical: 10,
+        marginVertical: 6,
         // Ensure it doesn't wrap:
         flexWrap: 'nowrap',
 
@@ -100,8 +102,9 @@ const styles = StyleSheet.create({
         marginTop: 5,
         fontWeight: '700',
     },
-    summaryCard: { padding: 16, backgroundColor: '#fff', borderRadius: 16, marginVertical: 6, elevation: 1 },
+    summaryCard: { padding: 14, backgroundColor: '#fff', borderRadius: 14, marginVertical: 4, elevation: 1, borderLeftWidth:4,borderLeftColor:'#6c9471' },
     label: { color: '#738076', fontSize: 12 },
+    period:{color:'#748078',marginTop:-8,marginBottom:8},insight:{padding:14,backgroundColor:'#eaf1ea',borderRadius:14,marginTop:10},insightTitle:{fontWeight:'700',color:'#315d3b',marginBottom:4},insightText:{color:'#536158'},
     income: { color: '#267a46' },
     expense: { color: '#bd4936' },
     totalPositive: { color: 'green' },

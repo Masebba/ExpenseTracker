@@ -1,7 +1,7 @@
 // screens/IncomeScreen.js
 import React, { useState, useContext } from 'react';
 import { View, StyleSheet, FlatList, Alert, TouchableOpacity } from 'react-native';
-import { TextInput, Button, Title, Text, Modal, Portal, Card } from 'react-native-paper';
+import { TextInput, Button, Title, Text, Modal, Portal, Card, IconButton } from 'react-native-paper';
 import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
 import { currencyFromCode } from '../utils/appUtils';
@@ -19,8 +19,6 @@ export default function IncomeScreen() {
     } = useContext(TransactionsContext);
 
     const { currency } = useContext(CurrencyContext); // Destructure 'currency'
-    // log the currency for debugging:
-    console.log("Currency value:", currency);
 
     // State for adding new income
     const [amount, setAmount] = useState('');
@@ -32,32 +30,29 @@ export default function IncomeScreen() {
     // State for editing an existing income transaction
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [editIncome, setEditIncome] = useState(null); // store the transaction being edited
+    const [search, setSearch] = useState('');
 
     // Handler to add new income
     const handleAddIncome = () => {
-        if (!amount) {
-            alert('Enter an amount');
+        if (!amount || !Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+            alert('Enter an amount greater than zero');
             return;
         }
-        addTransaction({ type: 'income', amount, description, category: selectedCategory });
-        setAmount('');
-        setDescription('');
+        addTransaction({ type: 'income', amount, description, category: selectedCategory }).then(() => { setAmount(''); setDescription(''); }).catch((error) => Alert.alert('Could not save income', error.message));
     };
 
     // Handler to update an existing income transaction
     const handleUpdateIncome = () => {
         if (!editIncome) return;
-        if (!editIncome.amount) {
-            alert('Enter an amount');
+        if (!editIncome.amount || !Number.isFinite(Number(editIncome.amount)) || Number(editIncome.amount) <= 0) {
+            alert('Enter an amount greater than zero');
             return;
         }
         updateTransaction(editIncome.id, {
             amount: editIncome.amount,
             description: editIncome.description,
             category: editIncome.category,
-        });
-        setEditModalVisible(false);
-        setEditIncome(null);
+        }).then(() => { setEditModalVisible(false); setEditIncome(null); }).catch((error) => Alert.alert('Could not update income', error.message));
     };
 
     // Handler to delete a transaction
@@ -103,7 +98,7 @@ export default function IncomeScreen() {
     };
 
     // Filter for income transactions
-    const incomeTransactions = transactions.filter((t) => t.type === 'income');
+    const incomeTransactions = transactions.filter((t) => t.type === 'income' && `${t.description || ''} ${t.category || ''} ${t.amount || ''}`.toLowerCase().includes(search.trim().toLowerCase()));
 
     return (
         <View style={styles.container}>
@@ -112,7 +107,7 @@ export default function IncomeScreen() {
                 label="Amount"
                 value={amount}
                 onChangeText={setAmount}
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
                 style={styles.input}
             />
             <TextInput
@@ -189,7 +184,7 @@ export default function IncomeScreen() {
                         onChangeText={(text) =>
                             setEditIncome({ ...editIncome, amount: parseFloat(text) || 0 })
                         }
-                        keyboardType="numeric"
+                        keyboardType="decimal-pad"
                         style={styles.input}
                     />
                     <TextInput
@@ -221,30 +216,21 @@ export default function IncomeScreen() {
             </Portal>
 
             {/* Income Transaction List */}
+            <TextInput dense label="Search income" value={search} onChangeText={setSearch} style={styles.input} />
             <FlatList
                 data={incomeTransactions}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
                     <Card style={styles.card}>
                         <Card.Content>
-                            <Text style={styles.amount}>
+                            <View style={styles.transactionTop}><View style={styles.transactionCopy}><Text style={styles.amount}>
                                 {/* ${item.amount.toFixed(2)} */}
                                 {item.type === 'income' ? '+' : '-'}{currencyFromCode(item.currency, currency).symbol} {item.amount.toFixed(2)}
                             </Text>
-                            <Text>{item.description}</Text>
-                            <Text>Category: {item.category}</Text>
-                            <Text style={styles.timestamp}>
-                                {new Date(item.timestamp).toLocaleString()}
-                            </Text>
+                            <Text numberOfLines={1}>{item.description || 'Income'}</Text>
+                            <Text style={styles.meta}>Category: {item.category} · {new Date(item.timestamp).toLocaleDateString()}</Text></View><View style={styles.inlineActions}>
+                            <IconButton icon="pencil-outline" size={19} onPress={() => { setEditIncome(item); setEditModalVisible(true); }} /><IconButton icon="delete-outline" iconColor="#b3261e" size={19} onPress={() => handleDeleteIncome(item.id)} /></View></View>
                         </Card.Content>
-                        <Card.Actions style={styles.cardActions}>
-                            <Button onPress={() => {
-                                // Set the current transaction for editing and show the edit modal
-                                setEditIncome(item);
-                                setEditModalVisible(true);
-                            }}>Edit</Button>
-                            <Button onPress={() => handleDeleteIncome(item.id)}>Delete</Button>
-                        </Card.Actions>
                     </Card>
                 )}
             />
@@ -253,16 +239,16 @@ export default function IncomeScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, paddingHorizontal: 18, paddingTop: 26, paddingBottom: 112, backgroundColor: '#f4f6f3' },
+    container: { flex: 1, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 90, backgroundColor: '#f4f6f3' },
     title: { marginBottom: 10, fontSize: 24, color: '#24432b' },
-    input: { marginBottom: 10, backgroundColor: '#fff', borderRadius: 14 },
+    input: { marginBottom: 6, backgroundColor: '#fff', borderRadius: 10, height: 50 },
     label: { marginBottom: 5 },
     button: { marginVertical: 5, borderRadius: 24 },
     modal: { backgroundColor: 'white', padding: 20, margin: 20, borderRadius: 20 },
-    card: { marginVertical: 6, backgroundColor: '#fff', borderRadius: 16, elevation: 1 },
+    card: { marginVertical: 3, backgroundColor: '#fff', borderRadius: 12, elevation: 1 },
     amount: { fontWeight: 'bold' },
     timestamp: { fontSize: 12, color: 'gray' },
-    cardActions: { justifyContent: 'space-between' },
+    transactionTop: { flexDirection:'row', alignItems:'center' }, transactionCopy:{flex:1}, inlineActions:{flexDirection:'row', alignItems:'center'}, meta:{fontSize:11,color:'#748078'},
     categoryRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
     editCategoryHint: { fontSize: 12, color: 'gray', marginLeft: 5 },
 });

@@ -19,8 +19,6 @@ export default function ExpenseScreen() {
     } = useContext(TransactionsContext);
 
     const { currency } = useContext(CurrencyContext); // Destructure 'currency'
-    // log the currency for debugging:
-    console.log("Currency value:", currency);
 
     // Fields for expense form
     const [amount, setAmount] = useState('');
@@ -31,6 +29,7 @@ export default function ExpenseScreen() {
 
     // For editing an existing expense
     const [editingExpense, setEditingExpense] = useState(null);
+    const [search, setSearch] = useState('');
 
     const resetForm = () => {
         setAmount('');
@@ -39,18 +38,20 @@ export default function ExpenseScreen() {
         setEditingExpense(null);
     };
 
-    const handleAddOrUpdateExpense = () => {
-        if (!amount) return alert('Enter an amount');
+    const handleAddOrUpdateExpense = async () => {
+        if (!amount || !Number.isFinite(Number(amount)) || Number(amount) <= 0) return alert('Enter an amount greater than zero');
+        try {
         if (editingExpense) {
-            updateTransaction(editingExpense.id, {
+            await updateTransaction(editingExpense.id, {
                 amount,
                 description,
                 category: selectedCategory,
             });
         } else {
-            addTransaction({ type: 'expense', amount, description, category: selectedCategory });
+            await addTransaction({ type: 'expense', amount, description, category: selectedCategory });
         }
         resetForm();
+        } catch (error) { Alert.alert('Could not save expense', error.message || 'Try again.'); }
     };
 
     const handleEditExpense = (expense) => {
@@ -68,7 +69,7 @@ export default function ExpenseScreen() {
     };
 
     // Filter only expense transactions
-    const expenseTransactions = transactions.filter(t => t.type === 'expense');
+    const expenseTransactions = transactions.filter(t => t.type === 'expense' && `${t.description || ''} ${t.category || ''} ${t.amount || ''}`.toLowerCase().includes(search.trim().toLowerCase()));
 
     // For category editing/deletion, we'll add buttons in the modal list.
     const renderCategoryOption = (cat) => (
@@ -107,7 +108,7 @@ export default function ExpenseScreen() {
                 label="Amount"
                 value={amount}
                 onChangeText={setAmount}
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
                 style={styles.input}
             />
             <TextInput
@@ -155,23 +156,21 @@ export default function ExpenseScreen() {
             </Portal>
 
             {/* Expense Transactions List */}
+            <TextInput dense label="Search expenses" value={search} onChangeText={setSearch} style={styles.input} />
             <FlatList
                 data={expenseTransactions}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
                     <Card style={styles.card}>
-                        <Card.Content>
+                        <Card.Content style={{paddingVertical:8}}>
+                            <View style={{flexDirection:'row',alignItems:'center'}}><View style={{flex:1}}>
                             <Text style={styles.amount}> {/*- ${item.amount.toFixed(2)} */}
                                 {item.type === 'expense' ? '-' : '+'}{currencyFromCode(item.currency, currency).symbol} {item.amount.toFixed(2)}
                             </Text>
-                            <Text>{item.description}</Text>
-                            <Text>Category: {item.category}</Text>
-                            <Text style={styles.timestamp}>{new Date(item.timestamp).toLocaleString()}</Text>
+                            <Text numberOfLines={1}>{item.description || 'Expense'}</Text>
+                            <Text style={styles.timestamp}>{item.category} · {new Date(item.timestamp).toLocaleDateString()}</Text></View>
+                            <View style={{flexDirection:'row'}}><IconButton icon="pencil-outline" size={19} onPress={() => handleEditExpense(item)} /><IconButton icon="delete-outline" iconColor="#b3261e" size={19} onPress={() => handleDeleteExpense(item.id)} /></View></View>
                         </Card.Content>
-                        <Card.Actions>
-                            <Button onPress={() => handleEditExpense(item)}>Edit</Button>
-                            <Button onPress={() => handleDeleteExpense(item.id)}>Delete</Button>
-                        </Card.Actions>
                     </Card>
                 )}
             />
@@ -180,13 +179,13 @@ export default function ExpenseScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, paddingHorizontal: 18, paddingTop: 26, paddingBottom: 112, backgroundColor: '#f4f6f3' },
+    container: { flex: 1, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 90, backgroundColor: '#f4f6f3' },
     title: { marginBottom: 10, fontSize: 24, color: '#24432b' },
-    input: { marginBottom: 10, backgroundColor: '#fff', borderRadius: 14 },
+    input: { marginBottom: 6, backgroundColor: '#fff', borderRadius: 10, height: 50 },
     label: { marginBottom: 5 },
     button: { marginVertical: 5, borderRadius: 24 },
     modal: { backgroundColor: 'white', padding: 20, margin: 20, borderRadius: 20 },
-    card: { marginVertical: 6, backgroundColor: '#fff', borderRadius: 16, elevation: 1 },
+    card: { marginVertical: 3, backgroundColor: '#fff', borderRadius: 12, elevation: 1 },
     amount: { fontWeight: 'bold' },
     timestamp: { fontSize: 12, color: 'gray' },
     categoryOption: {

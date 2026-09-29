@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View, Platform, KeyboardAvoidingView } from 'react-native';
 import { Button, Card, Menu, Text, TextInput, Title } from 'react-native-paper';
 import { AuthContext } from '../AuthContext';
 import { TransactionsContext } from '../TransactionsContext';
@@ -20,14 +20,15 @@ export default function ToolsScreen({ route }) {
   const [exchangeRate, setExchangeRate] = useState('');
   const [rateStatus, setRateStatus] = useState('');
   const [menu, setMenu] = useState(null);
-  const budgetKey = `expenseTracker.${user?.uid || 'guest'}.${activeWorkspace?.id || 'personal'}.monthlyBudget`;
-  const [savedBudget, setSavedBudget, budgetHydrated] = usePersistedState(budgetKey, 0);
+  const budgetKey = `expenseTracker.${user?.uid || 'guest'}.${activeWorkspace?.id || 'personal'}.spendingTargets`;
+  const [savedTargets, setSavedTargets, budgetHydrated] = usePersistedState(budgetKey, { daily: 0, weekly: 0, monthly: 0 });
   const [budgetInput, setBudgetInput] = useState('');
-  const monthlyExpenses = useMemo(() => transactions.filter((item) => item.type === 'expense' && inPeriod(item.timestamp, 'monthly')).reduce((sum, item) => sum + Number(item.amount || 0), 0), [transactions]);
+  const [targetPeriod, setTargetPeriod] = useState('monthly');
+  const spent = useMemo(() => transactions.filter((item) => item.type === 'expense' && inPeriod(item.timestamp, targetPeriod)).reduce((sum, item) => sum + Number(item.amount || 0), 0), [transactions, targetPeriod]);
   const rate = toNumber(exchangeRate, 0);
   const converted = toNumber(amount, 0) * rate;
 
-  useEffect(() => { if (budgetHydrated) setBudgetInput(savedBudget ? String(savedBudget) : ''); }, [budgetHydrated, savedBudget]);
+  useEffect(() => { if (budgetHydrated) setBudgetInput(savedTargets?.[targetPeriod] ? String(savedTargets[targetPeriod]) : ''); }, [budgetHydrated, savedTargets, targetPeriod]);
   useEffect(() => {
     if (mode !== 'converter') return undefined;
     let active = true;
@@ -45,17 +46,16 @@ export default function ToolsScreen({ route }) {
 
   const saveBudget = () => {
     const value = toNumber(budgetInput, NaN);
-    if (!Number.isFinite(value) || value < 0) { Alert.alert('Check budget', 'Enter a valid non-negative monthly budget.'); return; }
-    setSavedBudget(value);
+    if (!Number.isFinite(value) || value < 0) { Alert.alert('Check target', 'Enter a valid non-negative spending target.'); return; }
+    setSavedTargets((current) => ({ ...current, [targetPeriod]: value }));
   };
 
-  const remaining = Math.max(0, Number(savedBudget || 0) - monthlyExpenses);
-  const progress = savedBudget > 0 ? Math.min(100, monthlyExpenses / savedBudget * 100) : 0;
+  const savedBudget = Number(savedTargets?.[targetPeriod] || 0);
+  const remaining = Math.max(0, savedBudget - spent);
+  const progress = savedBudget > 0 ? Math.min(100, spent / savedBudget * 100) : 0;
 
-  return <ScrollView contentContainerStyle={styles.container}>
-    <Title style={styles.title}>{mode === 'budget' ? 'Monthly budget' : 'Currency converter'}</Title>
+  return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'}><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
     {mode === 'converter' && <Card style={styles.card}>
-      <Card.Title title="Currency converter" subtitle="Live rate when online; you can also enter a rate manually." />
       <Card.Content>
         <TextInput label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" style={styles.input} />
         <View style={styles.currencyRow}>
@@ -74,25 +74,25 @@ export default function ToolsScreen({ route }) {
     </Card>}
 
     {mode === 'budget' && <Card style={styles.card}>
-      <Card.Title title="Monthly spending plan" subtitle="Compare this month’s expenses with your target." />
       <Card.Content>
-        <TextInput label={`Monthly budget (${currency?.code || 'UGX'})`} value={budgetInput} onChangeText={setBudgetInput} keyboardType="decimal-pad" style={styles.input} />
-        <Button mode="contained" onPress={saveBudget} style={styles.button}>Save budget</Button>
-        <View style={styles.budgetRow}><Text>This month</Text><Text style={styles.spent}>{currency?.symbol} {monthlyExpenses.toLocaleString()}</Text></View>
+        <View style={styles.targets}>{['daily','weekly','monthly'].map((period) => <Button key={period} compact mode={targetPeriod === period ? 'contained' : 'outlined'} onPress={() => setTargetPeriod(period)}>{period[0].toUpperCase()+period.slice(1)}</Button>)}</View>
+        <TextInput label={`${targetPeriod[0].toUpperCase()+targetPeriod.slice(1)} target (${currency?.code || 'UGX'})`} value={budgetInput} onChangeText={setBudgetInput} keyboardType="decimal-pad" style={styles.input} />
+        <Button mode="contained" compact onPress={saveBudget} style={styles.button}>Save target</Button>
+        <View style={styles.budgetRow}><Text>This {targetPeriod}</Text><Text style={styles.spent}>{currency?.symbol} {spent.toLocaleString()}</Text></View>
         {savedBudget > 0 && <>
           <View style={styles.track}><View style={[styles.fill, { width: `${progress}%`, backgroundColor: progress >= 100 ? '#c34c3a' : '#3d8050' }]} /></View>
           <View style={styles.budgetRow}><Text>Remaining</Text><Text style={styles.remaining}>{currency?.symbol} {remaining.toLocaleString()}</Text></View>
         </>}
       </Card.Content>
     </Card>}
-  </ScrollView>;
+  </ScrollView></KeyboardAvoidingView>;
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 18, paddingTop: 38, paddingBottom: 120, backgroundColor: '#f4f6f3' },
-  title: { color: '#24432b', fontSize: 25, marginBottom: 14 },
+  container: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24, backgroundColor: '#f4f6f3' },
   card: { borderRadius: 18, backgroundColor: '#fff', marginBottom: 14, elevation: 1 },
   input: { backgroundColor: '#f7f9f6', marginVertical: 7 }, currencyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18, marginVertical: 7 }, arrow: { fontSize: 20, color: '#59715d' }, rateStatus: { fontSize: 11, color: '#768178', marginVertical: 3 },
   result: { borderRadius: 14, backgroundColor: '#edf4ed', padding: 15, marginTop: 8 }, resultLabel: { color: '#637369', fontSize: 12 }, resultAmount: { color: '#24432b', fontSize: 24, fontWeight: '800', marginTop: 4 },
+  targets: { flexDirection:'row', justifyContent:'space-between', marginBottom:6 },
   button: { marginVertical: 8, borderRadius: 24 }, budgetRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }, spent: { color: '#bd4936', fontWeight: '700' }, remaining: { color: '#267a46', fontWeight: '700' }, track: { height: 8, backgroundColor: '#e7ece7', borderRadius: 5, marginTop: 10, overflow: 'hidden' }, fill: { height: '100%', borderRadius: 5 },
 });

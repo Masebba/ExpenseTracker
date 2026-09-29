@@ -13,40 +13,43 @@ export const OrdersProvider = ({ children }) => {
   const scopeId = activeWorkspace?.id || 'personal';
   const storageKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}orders` : 'expenseTracker.guest.orders';
   const [orders, setOrders, hydrated] = usePersistedState(storageKey, []);
+  const syncTag = `${user?.uid || ''}:${scopeId}:${cloudSyncRevision}`;
+  const [cloudLoadedFor, setCloudLoadedFor] = React.useState('');
+  const cloudLoaded = cloudLoadedFor === syncTag;
 
   useEffect(() => {
     if (!user?.uid) return undefined;
-    return subscribeToCollection(user.uid, 'orders', (records) => setOrders((current) => [...records, ...current.filter((x) => !records.some((r) => r.id === x.id))]), undefined, scopeId);
-  }, [user?.uid, setOrders, scopeId, cloudSyncRevision]);
+    if (!hydrated) return undefined;
+    return subscribeToCollection(user.uid, 'orders', (records) => { setOrders(records); setCloudLoadedFor(syncTag); }, (error) => console.warn('Orders cloud listener failed:', error?.message || error), scopeId);
+  }, [user?.uid, setOrders, scopeId, cloudSyncRevision, hydrated, syncTag]);
 
   useEffect(() => {
-    if (!user?.uid || !cloudSyncEnabled || !hydrated) return;
+    if (!user?.uid || !cloudSyncEnabled || !hydrated || !cloudLoaded) return;
     replaceCollection(user.uid, 'orders', orders, scopeId).catch((error) => console.warn('Local order backup failed:', error?.message || error));
-  }, [user?.uid, scopeId, cloudSyncRevision, cloudSyncEnabled, hydrated]);
+  }, [user?.uid, scopeId, cloudSyncRevision, cloudSyncEnabled, hydrated, cloudLoaded, orders]);
 
   const addOrder = useCallback(async (data) => {
     const total = toNumber(data.total, NaN);
     if (!data.customerName?.trim() || !data.productName?.trim()) throw new Error('Customer name and product name are required.');
     if (!Number.isFinite(total) || total <= 0) throw new Error('Order total must be greater than zero.');
     const order = { id: makeId('order'), customerName: data.customerName.trim(), customerPhone: String(data.customerPhone || '').trim(), productName: data.productName.trim(), total: Math.round(total * 100) / 100, status: 'Pending', installments: [], createdAt: nowIso(), updatedAt: nowIso() };
+    await writeRecord(user?.uid, 'orders', order, scopeId);
     setOrders((current) => [...current, order]);
-    await writeRecord(user?.uid, 'orders', order, scopeId).catch(() => {});
     return order;
   }, [setOrders, user?.uid, scopeId]);
 
   const updateOrder = useCallback(async (id, updates) => {
-    let record;
-    setOrders((current) => {
-      record = current.find((x) => x.id === id);
-      return current.map((x) => x.id === id ? { ...x, ...updates, total: updates.total === undefined ? x.total : toNumber(updates.total, x.total), updatedAt: nowIso() } : x);
-    });
-    const updated = record ? { ...record, ...updates, updatedAt: nowIso() } : null;
-    if (updated) await writeRecord(user?.uid, 'orders', updated, scopeId).catch(() => {});
-  }, [setOrders, user?.uid, scopeId]);
+    const current = orders.find((x) => x.id === id);
+    if (!current) return;
+    const updated = { ...current, ...updates, total: updates.total === undefined ? current.total : toNumber(updates.total, NaN), updatedAt: nowIso() };
+    if (!Number.isFinite(updated.total) || updated.total <= 0) throw new Error('Order total must be greater than zero.');
+    await writeRecord(user?.uid, 'orders', updated, scopeId);
+    setOrders((items) => items.map((x) => x.id === id ? updated : x));
+  }, [orders, setOrders, user?.uid, scopeId]);
 
   const deleteOrder = useCallback(async (id) => {
+    if (user?.uid) await deleteRecord(user.uid, 'orders', id, scopeId);
     setOrders((current) => current.filter((x) => x.id !== id));
-    if (user?.uid) await deleteRecord(user.uid, 'orders', id, scopeId).catch(() => {});
   }, [setOrders, user?.uid, scopeId]);
 
   const addInstallment = useCallback(async (id, amount) => {
@@ -59,8 +62,8 @@ export const OrdersProvider = ({ children }) => {
     if (value > remaining) throw new Error(`Installment cannot exceed the remaining balance of ${remaining.toFixed(2)}.`);
     const installment = { id: makeId('inst'), amount: Math.round(value * 100) / 100, date: nowIso() };
     const updated = { ...current, installments: [...(current.installments || []), installment], status: paid + value >= current.total ? 'Completed' : 'Pending', updatedAt: nowIso() };
+    await writeRecord(user?.uid, 'orders', updated, scopeId);
     setOrders((list) => list.map((x) => x.id === id ? updated : x));
-    await writeRecord(user?.uid, 'orders', updated, scopeId).catch(() => {});
     return installment;
   }, [orders, setOrders, user?.uid, scopeId]);
 

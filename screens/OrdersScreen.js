@@ -16,6 +16,8 @@ export default function OrdersScreen() {
   const [productName, setProductName] = useState('');
   const [total, setTotal] = useState('');
   const [installmentAmount, setInstallmentAmount] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
 
   const resetOrderForm = () => { setCustomerName(''); setCustomerPhone(''); setProductName(''); setTotal(''); setEditingOrder(null); };
 
@@ -60,7 +62,9 @@ export default function OrdersScreen() {
   return <View style={styles.container}>
     <Title>Order Management</Title>
     <Button mode="contained" onPress={() => { resetOrderForm(); setOrderModalVisible(true); }} style={styles.button}>Add Order (Installments)</Button>
-    {orders.length ? <FlatList data={orders} keyExtractor={(item) => item.id} renderItem={renderOrder} /> : <Text style={styles.empty}>No orders recorded yet.</Text>}
+    <TextInput label="Search customer, phone or product" value={search} onChangeText={setSearch} style={styles.input} />
+    <View style={styles.filters}>{['All','Pending','Completed'].map((status) => <Button key={status} compact mode={statusFilter===status?'contained':'outlined'} onPress={() => setStatusFilter(status)}>{status}</Button>)}</View>
+    {orders.length ? <FlatList data={orders.filter((order) => (statusFilter==='All' || order.status===statusFilter) && `${order.customerName} ${order.customerPhone} ${order.productName}`.toLowerCase().includes(search.trim().toLowerCase()))} keyExtractor={(item) => item.id} renderItem={renderOrder} /> : <Text style={styles.empty}>No orders recorded yet.</Text>}
     <Portal>
       <Modal visible={orderModalVisible} onDismiss={() => { setOrderModalVisible(false); resetOrderForm(); }} contentContainerStyle={styles.modal}>
         <Title>{editingOrder ? 'Edit Order' : 'Add Order'}</Title>
@@ -83,6 +87,7 @@ export default function OrdersScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 18, paddingTop: 22, paddingBottom: 112, backgroundColor: '#f4f6f3' },
+  filters:{flexDirection:'row',gap:4,marginBottom:6},
   card: { marginVertical: 6, backgroundColor: '#fff', borderRadius: 16, elevation: 1 },
   button: { marginVertical: 5, borderRadius: 24 },
   input: { marginBottom: 10, backgroundColor: '#fff' },

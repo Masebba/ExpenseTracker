@@ -18,56 +18,52 @@ export const TransactionsProvider = ({ children }) => {
   const categoryKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}categories` : 'expenseTracker.guest.categories';
   const [transactions, setTransactions, hydrated] = usePersistedState(storageKey, []);
   const [categories, setCategories] = usePersistedState(categoryKey, defaultCategories);
-  const [cloudLoaded, setCloudLoaded] = useState(false);
+  const syncTag = `${user?.uid || ''}:${scopeId}:${cloudSyncRevision}`;
+  const [cloudLoadedFor, setCloudLoadedFor] = useState('');
+  const cloudLoaded = cloudLoadedFor === syncTag;
 
-  useEffect(() => setCloudLoaded(false), [user?.uid, scopeId]);
   useEffect(() => {
-    if (!user?.uid) return undefined;
+    if (!user?.uid || !hydrated) return undefined;
     return subscribeToCollection(user.uid, 'transactions', (records) => {
-      setTransactions((current) => {
-        const localIds = new Set(current.map((x) => x.id));
-        const merged = [...records, ...current.filter((x) => !records.some((r) => r.id === x.id))];
-        return localIds.size && merged.length >= current.length ? merged : records;
-      });
-      setCloudLoaded(true);
-    }, undefined, scopeId);
-  }, [user?.uid, scopeId, cloudSyncRevision]);
+      if (hydrated) setTransactions(records);
+      setCloudLoadedFor(syncTag);
+    }, (error) => console.warn('Transaction cloud listener failed:', error?.message || error), scopeId);
+  }, [user?.uid, scopeId, cloudSyncRevision, hydrated, setTransactions, syncTag]);
 
   useEffect(() => {
-    if (user?.uid && cloudSyncEnabled && hydrated) replaceCollection(user.uid, 'transactions', transactions, scopeId).catch((error) => console.warn('Local transaction backup failed:', error?.message || error));
-  }, [user?.uid, scopeId, cloudSyncRevision, cloudSyncEnabled, hydrated]);
+    if (user?.uid && cloudSyncEnabled && hydrated && cloudLoaded) replaceCollection(user.uid, 'transactions', transactions, scopeId).catch((error) => console.warn('Local transaction backup failed:', error?.message || error));
+  }, [user?.uid, scopeId, cloudSyncRevision, cloudSyncEnabled, hydrated, cloudLoaded, transactions]);
 
   const persist = useCallback(async (next, removedId = null) => {
     if (!user?.uid) return;
-    try {
-      if (removedId) await deleteRecord(user.uid, 'transactions', removedId, scopeId);
-      else if (next) await Promise.all(next.map((record) => writeRecord(user.uid, 'transactions', record, scopeId)));
-    } catch (error) { console.warn('Transaction cloud sync failed:', error?.message || error); }
+    if (removedId) return deleteRecord(user.uid, 'transactions', removedId, scopeId);
+    if (next) return Promise.all(next.map((record) => writeRecord(user.uid, 'transactions', record, scopeId)));
   }, [user?.uid, scopeId, cloudSyncRevision]);
 
   const addTransaction = useCallback(async ({ type, amount, description = '', category = 'Uncategorized', id, currency: transactionCurrency }) => {
     const value = toNumber(amount, NaN);
-    if (!Number.isFinite(value) || value < 0) throw new Error('Enter a valid non-negative amount.');
+    if (!Number.isFinite(value) || value <= 0) throw new Error('Enter an amount greater than zero.');
     if (!['income', 'expense'].includes(type)) throw new Error('Invalid transaction type.');
     const transaction = { id: id || makeId('txn'), type, amount: Math.round(value * 100) / 100, description: description.trim(), category: category || 'Uncategorized', currency: transactionCurrency || currency?.code || null, timestamp: nowIso(), updatedAt: nowIso() };
+    await persist([transaction]);
     setTransactions((current) => [...current, transaction]);
     addNotification(type === 'income' ? 'Income recorded' : 'Expense recorded', `${transaction.description || transaction.category}: ${transaction.currency || currency?.code || ''} ${transaction.amount.toFixed(2)}`);
-    await persist([transaction]);
     return transaction;
   }, [persist, setTransactions, addNotification, currency?.code]);
 
   const updateTransaction = useCallback(async (id, updatedData) => {
+    if (updatedData.amount !== undefined && (!Number.isFinite(toNumber(updatedData.amount, NaN)) || toNumber(updatedData.amount, NaN) <= 0)) throw new Error('Enter an amount greater than zero.');
     let updated;
-    setTransactions((current) => {
-      updated = current.map((t) => t.id === id ? { ...t, ...updatedData, amount: updatedData.amount === undefined ? t.amount : toNumber(updatedData.amount, t.amount), updatedAt: nowIso() } : t);
-      return updated;
-    });
-    if (updated) await persist(updated);
-  }, [persist, setTransactions]);
+    const current = transactions.find((item) => item.id === id);
+    if (!current) return;
+    updated = { ...current, ...updatedData, amount: updatedData.amount === undefined ? current.amount : toNumber(updatedData.amount, current.amount), updatedAt: nowIso() };
+    await persist([updated]);
+    setTransactions((items) => items.map((item) => item.id === id ? updated : item));
+  }, [persist, transactions, setTransactions]);
 
   const deleteTransaction = useCallback(async (id) => {
-    setTransactions((current) => current.filter((t) => t.id !== id));
     await persist(null, id);
+    setTransactions((current) => current.filter((t) => t.id !== id));
   }, [persist, setTransactions]);
 
   const addCategory = useCallback((type, name) => {
@@ -91,8 +87,8 @@ export const TransactionsProvider = ({ children }) => {
 
   const clearTransactions = useCallback(async () => {
     const ids = transactions.map((t) => t.id);
+    await Promise.all(ids.map((id) => deleteRecord(user?.uid, 'transactions', id, scopeId)));
     setTransactions([]);
-    await Promise.all(ids.map((id) => deleteRecord(user?.uid, 'transactions', id, scopeId).catch(() => {})));
   }, [transactions, setTransactions, user?.uid, scopeId]);
 
   const value = useMemo(() => ({ transactions, addTransaction, updateTransaction, editTransaction: updateTransaction, deleteTransaction, categories, addCategory, updateCategory, deleteCategory, clearTransactions, hydrated, cloudLoaded }), [transactions, addTransaction, updateTransaction, deleteTransaction, categories, addCategory, updateCategory, deleteCategory, clearTransactions, hydrated, cloudLoaded]);

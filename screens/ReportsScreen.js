@@ -1,6 +1,6 @@
 // screens/ReportsScreen.js
 import React, { useContext, useState, } from 'react';
-import { View, StyleSheet, ScrollView, Dimensions, FlatList } from 'react-native';
+import { View, StyleSheet, ScrollView, Dimensions, FlatList, Platform, KeyboardAvoidingView } from 'react-native';
 import { Title, Text, Button, Card } from 'react-native-paper';
 import * as Print from 'expo-print';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import { OrdersContext } from '../OrdersContext';
 import { CurrencyContext } from '../CurrencyContext';
 import { TransactionsContext } from '../TransactionsContext';
 import { formatMoney, inPeriod, escapeHtml } from '../utils/appUtils';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
 
@@ -23,23 +24,23 @@ export default function ReportsScreen() {
     const { currency } = useContext(CurrencyContext);
     const { transactions } = useContext(TransactionsContext);
     // log the currency for debugging:
-    console.log("Currency value:", currency);
 
     // Filter state for sales metrics.
     const filterOptions = ['daily', 'weekly', 'monthly', 'yearly'];
     const [filterPeriod, setFilterPeriod] = useState('daily');
 
     const filteredSales = sales.filter((sale) => inPeriod(sale.timestamp, filterPeriod));
-    const filteredTotalSales = filteredSales.reduce((sum, sale) => sum + sale.finalAmount, 0);
+    const currencySales = filteredSales.filter((sale) => !sale.currency || sale.currency === currency?.code);
+    const filteredTotalSales = currencySales.reduce((sum, sale) => sum + Number(sale.finalAmount || 0), 0);
 
-    const filteredBuyingCost = filteredSales.reduce((sum, sale) => sum + ((sale.costAtSale ?? products.find(p => p.id === sale.productId)?.buyingPrice ?? 0) * sale.quantity), 0);
+    const filteredBuyingCost = currencySales.reduce((sum, sale) => sum + ((sale.costAtSale ?? products.find(p => p.id === sale.productId)?.buyingPrice ?? 0) * sale.quantity), 0);
 
     // Profit/Loss: Total Sales minus Total Buying Cost.
     const filteredProfit = filteredTotalSales - filteredBuyingCost;
 
     // Sales History: count units sold per product (filtered).
     const productSalesCount = {};
-    filteredSales.forEach(sale => {
+    currencySales.forEach(sale => {
         productSalesCount[sale.productId] = (productSalesCount[sale.productId] || 0) + sale.quantity;
     });
     // Prepare data for the BarChart.
@@ -55,7 +56,7 @@ export default function ReportsScreen() {
 
     // Top 3 Profit-Making Products (filtered).
     const productProfitMap = {};
-    filteredSales.forEach(sale => {
+    currencySales.forEach(sale => {
         const product = products.find(p => p.id === sale.productId);
         if (product) {
             const profit = sale.finalAmount - (sale.costAtSale ?? product.buyingPrice) * sale.quantity;
@@ -118,10 +119,7 @@ export default function ReportsScreen() {
     };
 
     return (
-        <ScrollView contentContainerStyle={styles.container}>
-            <Title style={styles.dashboardTitle}>
-                <MaterialCommunityIcons name="view-dashboard" size={28} color="#367f39" /> Dashboard
-            </Title>
+        <SafeAreaView edges={['top']} style={{flex:1,backgroundColor:'#2f7040'}}><KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}><View style={styles.fixedHeader}><Title style={styles.dashboardTitle}>Dashboard</Title></View><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
 
             {/* Filters */}
             <View style={styles.filterContainer}>
@@ -131,6 +129,7 @@ export default function ReportsScreen() {
                         mode={filterPeriod === period ? 'contained' : 'outlined'}
                         onPress={() => setFilterPeriod(period)}
                         style={styles.filterButton}
+                        compact
                     >
                         {period.charAt(0).toUpperCase() + period.slice(1)}
                     </Button>
@@ -151,7 +150,7 @@ export default function ReportsScreen() {
                 </Card>
                 <Card style={styles.summaryCard}>
                     <Card.Title
-                        title="Profit / Loss"
+                        title="Sales margin"
                         left={() => <MaterialCommunityIcons name="chart-line" size={24} color="#367f39" />}
                     />
                     <Card.Content>
@@ -268,7 +267,7 @@ export default function ReportsScreen() {
                                 <Card.Title title={`Order #${item.id}`} subtitle={item.customerName} />
                                 <Card.Content>
                                     <Text>Product: {item.productName}</Text>
-                                    <Text>Total: ${formatMoney(item.total, currency)}</Text>
+                                    <Text>Total: {formatMoney(item.total, currency)}</Text>
                                 </Card.Content>
                             </Card>
                         )}
@@ -280,41 +279,43 @@ export default function ReportsScreen() {
             <Button mode="outlined" style={styles.reportButton} onPress={handleDownloadReport}>
                 Generate Detailed Report
             </Button>
-        </ScrollView>
+        </ScrollView></KeyboardAvoidingView></SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
-        padding: 16,
+        padding: 12,
         paddingBottom: 90,
         alignItems: 'stretch',
         backgroundColor: '#f4f6f3',
     },
+    fixedHeader: { backgroundColor: '#2f7040', paddingHorizontal: 18, paddingVertical: 10 },
     dashboardTitle: {
         textAlign: 'left',
-        marginBottom: 14,
+        marginBottom: 0,
         fontSize: 24,
-        color: '#24432b',
-        paddingTop: 38,
+        color: '#ffffff',
+        paddingTop: 0,
     },
     filterContainer: {
         flexDirection: 'row',
-        justifyContent: 'space-around',
-        marginBottom: 15,
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        marginBottom: 8,
     },
     filterButton: {
-        marginHorizontal: 4,
+        marginHorizontal: 2,
     },
     cardsContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginBottom: 15,
+        marginBottom: 8,
     },
     summaryCard: {
         width: (width - 40) / 2,
         backgroundColor: '#fff',
-        borderRadius: 16,
+        borderRadius: 12,
         elevation: 1,
     },
     statText: {
@@ -327,9 +328,9 @@ const styles = StyleSheet.create({
         color: '#555',
     },
     graphCard: {
-        marginBottom: 15,
+        marginBottom: 9,
         backgroundColor: '#fff',
-        borderRadius: 16,
+        borderRadius: 12,
         elevation: 1,
         overflow: 'hidden',
     },
@@ -342,13 +343,13 @@ const styles = StyleSheet.create({
         borderRadius: 8,
     },
     card: {
-        marginVertical: 8,
+        marginVertical: 4,
         backgroundColor: '#fff',
-        borderRadius: 16,
+        borderRadius: 12,
         elevation: 1,
     },
     itemText: {
-        fontSize: 16,
+        fontSize: 14,
         marginVertical: 2,
     },
     orderCard: {

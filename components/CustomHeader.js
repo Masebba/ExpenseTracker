@@ -39,11 +39,11 @@ export default function CustomHeader() {
 }
 
 const styles = StyleSheet.create({
-  container: { height: 74, width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingTop: 12, paddingBottom: 12, backgroundColor: '#2f7040', borderRadius: 0 },
+  container: { height: 82, width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingTop: 20, paddingBottom: 12, backgroundColor: '#2f7040', borderRadius: 0 },
   profile: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   avatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#e5ebe4' },
   avatarFallback: { backgroundColor: '#dce8dd' },
-  name: { maxWidth: '82%', fontSize: 15, fontWeight: '700', color: '#fff' },
+  name: { maxWidth: '100%', fontSize: 12, color: '#e1eee3', marginTop: 2 },
   bell: { height: 44, width: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)' },
   badge: { position: 'absolute', right: -1, top: -1, minWidth: 17, height: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: '#c74632' },
   badgeText: { color: 'white', fontSize: 9, fontWeight: '700' },

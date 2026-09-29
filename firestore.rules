@@ -21,32 +21,36 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isUser(userId);
-      allow create, update, delete: if isUser(userId);
+      allow create: if isUser(userId) && !('developerAdmin' in request.resource.data);
+      allow update: if isUser(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['developerAdmin']);
+      allow delete: if isUser(userId);
       match /{collectionName}/{document=**} {
         allow read, write: if collectionName != 'memberships' && isUser(userId);
       }
       match /memberships/{orgId} {
         allow read: if isUser(userId) || (signedIn() && hasMembership(orgId));
-        allow create: if signedIn() && request.resource.data.status == 'active'
+        allow create: if signedIn() && request.auth.token.email is string && request.resource.data.status == 'active'
           && request.resource.data.role in ['owner', 'admin', 'editor', 'viewer']
           && request.resource.data.organizationId == orgId
           && (isUser(userId)
-            ? ((request.resource.data.role == 'owner' && request.resource.data.email == request.auth.token.email && get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == userId)
-              || (request.resource.data.email == request.auth.token.email
-              && exists(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email))
-              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email)).data.status == 'pending'
-              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email)).data.role == request.resource.data.role))
+            ? ((request.resource.data.role == 'owner' && request.resource.data.email == request.auth.token.email.lower() && get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == userId)
+              || (request.resource.data.email == request.auth.token.email.lower()
+              && exists(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email.lower()))
+              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email.lower())).data.status == 'pending'
+              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email.lower())).data.role == request.resource.data.role))
             : (request.auth.uid == userId
-              && exists(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email))
-              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email)).data.status == 'pending'
-              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email)).data.email == request.auth.token.email
-              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email)).data.role == request.resource.data.role));
+              && exists(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email.lower()))
+              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email.lower())).data.status == 'pending'
+              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email.lower())).data.email == request.auth.token.email.lower()
+              && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email.lower())).data.role == request.resource.data.role));
         allow update: if signedIn() && resource.data.role != 'owner'
           && activeMember(resource.data.organizationId) && role(resource.data.organizationId) == 'owner'
           && request.resource.data.organizationId == resource.data.organizationId
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'status', 'updatedAt']);
         allow delete: if signedIn() && resource.data.role != 'owner'
-          && activeMember(resource.data.organizationId) && role(resource.data.organizationId) == 'owner';
+          && ((request.auth.uid == userId)
+            || (activeMember(resource.data.organizationId) && role(resource.data.organizationId) == 'owner'));
       }
     }
 
@@ -56,17 +60,17 @@ service cloud.firestore {
       allow update: if activeMember(orgId) && role(orgId) == 'owner' && request.resource.data.ownerId == resource.data.ownerId;
       allow delete: if activeMember(orgId) && role(orgId) == 'owner';
       match /{collectionName}/{document=**} {
-        allow read: if activeMember(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories'];
+      allow read: if activeMember(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories', 'customers', 'suppliers', 'invoices', 'purchases'];
       allow create: if canEdit(orgId)
-          && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories']
+          && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories', 'customers', 'suppliers', 'invoices', 'purchases']
           && request.resource.data.createdBy == request.auth.uid;
-        allow update: if canEdit(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories'];
-        allow delete: if canEdit(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories'];
+        allow update: if canEdit(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories', 'customers', 'suppliers', 'invoices', 'purchases'];
+        allow delete: if canEdit(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories', 'customers', 'suppliers', 'invoices', 'purchases'];
       }
       match /invitations/{email} {
-        allow read: if (signedIn() && resource.data.email == request.auth.token.email)
+        allow read: if (signedIn() && request.auth.token.email is string && resource.data.email == request.auth.token.email.lower())
           || canManage(orgId);
-        allow delete: if signedIn() && resource.data.email == request.auth.token.email;
+        allow delete: if signedIn() && request.auth.token.email is string && resource.data.email == request.auth.token.email.lower();
         allow create, update: if canManage(orgId)
           && request.resource.data.organizationId == orgId
           && email == request.resource.data.email
@@ -80,6 +84,13 @@ service cloud.firestore {
       allow list: if signedIn() && resource.data.organizationId is string
         && activeMember(resource.data.organizationId)
         && role(resource.data.organizationId) in ['owner', 'admin'];
+    }
+
+    // collectionGroup('invitations') requires a recursive collection-group rule.
+    // It only allows a signed-in recipient to read their own normalized email invitations.
+    match /{path=**}/invitations/{invitationId} {
+      allow read: if signedIn() && request.auth.token.email is string
+        && resource.data.email == request.auth.token.email.lower();
     }
 
     match /advertisements/{advertisementId} {

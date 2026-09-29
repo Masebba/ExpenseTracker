@@ -1,15 +1,19 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Alert, ImageBackground, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ImageBackground, ScrollView, StyleSheet, View, Platform, KeyboardAvoidingView } from 'react-native';
 import { Button, Card, Dialog, Portal, RadioButton, Text, TextInput, Title } from 'react-native-paper';
 import { AuthContext } from '../AuthContext';
 import { AppFeaturesContext } from '../AppFeaturesContext';
 import * as ImagePicker from 'expo-image-picker';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { saveImageLocally } from '../utils/appUtils';
 
 export default function WorkspacesScreen({ navigation }) {
-  const { user, memberships, invitations, acceptInvitation, activeWorkspace, setActiveWorkspace, createCompany, inviteMember, getMembers, changeMemberRole, removeMember, isDeveloper, developerAccessInfo, updateWorkspacePhoto } = useContext(AuthContext);
+  const { user, memberships, invitations, invitationSyncError, acceptInvitation, activeWorkspace, setActiveWorkspace, createCompany, inviteMember, getMembers, changeMemberRole, removeMember, isDeveloper, developerAccessInfo, updateWorkspacePhoto, updateWorkspaceDetails } = useContext(AuthContext);
   const { ads, addAd, removeAd } = useContext(AppFeaturesContext);
   const [name, setName] = useState('');
+  const emptyDetails = { legalName:'', email:'', phone:'', alternatePhone:'', address:'', city:'', country:'', taxId:'', registrationNumber:'', website:'', contactName:'', contactTitle:'', paymentMethod:'', paymentDetails:'' };
+  const [newDetails, setNewDetails] = useState(emptyDetails);
+  const [editDetails, setEditDetails] = useState(emptyDetails);
   const [type, setType] = useState('company');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('editor');
@@ -22,6 +26,7 @@ export default function WorkspacesScreen({ navigation }) {
   const [selectedId, setSelectedId] = useState(null);
   const [busy, setBusy] = useState(false);
   const current = memberships.find((item) => item.id === activeWorkspace?.id);
+  useEffect(() => { setEditDetails({ ...emptyDetails, ...(current?.details || {}) }); }, [current?.id, current?.details]);
 
   const refreshMembers = useCallback(async () => {
     if (!current || !['owner', 'admin'].includes(current.role)) { setMembers([]); return; }
@@ -38,9 +43,9 @@ export default function WorkspacesScreen({ navigation }) {
   };
 
   const invite = () => perform(async () => {
-    await inviteMember(current.id, inviteEmail, inviteRole);
+    const emailToInvite = inviteEmail.trim();
+    await inviteMember(current.id, emailToInvite, inviteRole);
     setInviteEmail('');
-    await refreshMembers();
   }, 'Invitation sent. The person must sign in with that email and accept it in Workspaces.');
 
   const publishAd = () => perform(async () => {
@@ -60,8 +65,9 @@ export default function WorkspacesScreen({ navigation }) {
     }, 'Organisation image updated.');
   };
 
-  return <ScrollView contentContainerStyle={styles.container}>
-    <Title style={styles.title}>Personal & organisations</Title>
+  return <SafeAreaView edges={['top']} style={styles.safeArea}><KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+  <View style={styles.pageHeader}><Title style={styles.title}>Personal & organisations</Title></View>
+  <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
     <Text style={styles.copy}>Your personal workspace stays private. Create or join as many organisations as you need, then switch workspace to see its separate transactions, inventory, sales, and orders.</Text>
     {!!invitations?.length && <Card style={styles.card}>
       <Card.Title title="Organisation invitations" />
@@ -69,6 +75,9 @@ export default function WorkspacesScreen({ navigation }) {
         <View style={styles.memberInfo}><Text>{invitation.organizationName}</Text><Text style={styles.copy}>Invited as {invitation.role}</Text></View>
         <Button mode="contained" loading={busy} onPress={() => perform(() => acceptInvitation(invitation), 'Invitation accepted.')}>Accept</Button>
       </View>)}</Card.Content>
+    </Card>}
+    {!!invitationSyncError && <Card style={styles.card}>
+      <Card.Content><Text style={styles.copy}>Invitations could not sync. Publish the updated firestore.rules file to the app’s Firebase project to enable secure invitation lookup.</Text></Card.Content>
     </Card>}
     <Card style={styles.card}>
       <Card.Title title="Your workspaces" />
@@ -93,16 +102,21 @@ export default function WorkspacesScreen({ navigation }) {
       <Card.Title title="Create an organisation" />
       <Card.Content>
         <TextInput label="Company or organisation name" value={name} onChangeText={setName} style={styles.input} />
+        {Object.keys(emptyDetails).map((key)=><TextInput key={key} label={{legalName:'Registered legal name',email:'Business email',phone:'Business phone',alternatePhone:'Alternate business phone',address:'Business address',city:'City or town',country:'Country',taxId:'Tax identification number',registrationNumber:'Company / organisation registration number',website:'Website',contactName:'Invoice contact person',contactTitle:'Contact person role',paymentMethod:'Preferred payment method',paymentDetails:'Payment instructions or account details'}[key]} value={newDetails[key]} onChangeText={(value)=>setNewDetails((item)=>({...item,[key]:value}))} style={styles.input} />)}
         <RadioButton.Group value={type} onValueChange={setType}>
           <RadioButton.Item label="Company" value="company" />
           <RadioButton.Item label="Organisation" value="organization" />
         </RadioButton.Group>
-        <Button mode="contained" loading={busy} disabled={busy || !name.trim()} onPress={() => perform(async () => { await createCompany(name, type); setName(''); }, 'Your new workspace is ready.')}>Create workspace</Button>
+        <Button mode="contained" loading={busy} disabled={busy || !name.trim()} onPress={() => perform(async () => { await createCompany(name, type, newDetails); setName(''); setNewDetails(emptyDetails); }, 'Your new workspace is ready.')}>Create workspace</Button>
       </Card.Content>
     </Card>
     {current && <Card style={styles.card}>
       <Card.Title title="Organisation profile" subtitle={current.name} />
-      <Card.Content><Button icon="image-edit-outline" mode="outlined" disabled={current.role !== 'owner' || busy} onPress={chooseWorkspaceImage}>Change organisation image</Button></Card.Content>
+      <Card.Content><Button icon="image-edit-outline" mode="outlined" disabled={current.role !== 'owner' || busy} onPress={chooseWorkspaceImage}>Change organisation image</Button>
+        <Text style={styles.section}>Invoice and organisation details</Text>
+        {Object.keys(emptyDetails).map((key)=><TextInput key={key} label={{legalName:'Registered legal name',email:'Business email',phone:'Business phone',alternatePhone:'Alternate business phone',address:'Business address',city:'City or town',country:'Country',taxId:'Tax identification number',registrationNumber:'Company / organisation registration number',website:'Website',contactName:'Invoice contact person',contactTitle:'Contact person role',paymentMethod:'Preferred payment method',paymentDetails:'Payment instructions or account details'}[key]} value={editDetails[key]||''} onChangeText={(value)=>setEditDetails((item)=>({...item,[key]:value}))} style={styles.input} />)}
+        <Button mode="contained" disabled={busy || current.role !== 'owner'} loading={busy} onPress={()=>perform(()=>updateWorkspaceDetails(current.id,editDetails),'Organisation details saved.')}>Save organisation details</Button>
+      </Card.Content>
     </Card>}
     {current && <Card style={styles.card}>
       <Card.Title title={`Manage ${current.name}`} subtitle={`Your role: ${current.role}`} />
@@ -110,7 +124,7 @@ export default function WorkspacesScreen({ navigation }) {
         {['owner', 'admin'].includes(current.role) ? <>
           <Text style={styles.section}>Add an existing user</Text>
           <Text style={styles.copy}>The person must sign up first using this same email address.</Text>
-          <TextInput label="Member email" value={inviteEmail} onChangeText={setInviteEmail} autoCapitalize="none" keyboardType="email-address" style={styles.input} />
+          <TextInput label="Member email" value={inviteEmail} onChangeText={setInviteEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" returnKeyType="done" blurOnSubmit style={styles.input} />
           <RadioButton.Group value={inviteRole} onValueChange={setInviteRole}>
             <RadioButton.Item label="Admin · invite and manage workspace" value="admin" />
             <RadioButton.Item label="Editor · manage business records" value="editor" />
@@ -137,7 +151,8 @@ export default function WorkspacesScreen({ navigation }) {
         <Button textColor="#b3261e" onPress={() => perform(async () => { await removeMember(current.id, selectedId); setSelectedId(null); await refreshMembers(); })}>Remove</Button>
       </Dialog.Actions>
     </Dialog></Portal>
-  </ScrollView>;
+  </ScrollView>
+  </KeyboardAvoidingView></SafeAreaView>;
 }
 
-const styles = StyleSheet.create({ container: { paddingHorizontal: 18, paddingTop: 38, paddingBottom: 120, backgroundColor: '#f4f6f3' }, title: { textAlign: 'left', fontSize: 25, color: '#24432b', marginBottom: 10 }, copy: { color: '#647168', lineHeight: 21, marginBottom: 12 }, diagnostic: { color: '#59675d', fontSize: 12, lineHeight: 18 }, card: { marginBottom: 14, borderRadius: 16, backgroundColor: '#fff', elevation: 1 }, input: { backgroundColor: '#f7f9f6', marginVertical: 8 }, workspaceButton: { marginBottom: 8, borderRadius: 22 }, section: { fontSize: 16, fontWeight: 'bold', marginTop: 16, marginBottom: 8, color: '#2b4931' }, member: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#dde4dc' }, memberInfo: { flex: 1 }, footer: { color: '#777', textAlign: 'center', marginVertical: 12 } });
+const styles = StyleSheet.create({ flex:{flex:1}, safeArea:{flex:1,backgroundColor:'#2f7040'}, pageHeader:{paddingHorizontal:18,paddingVertical:10,backgroundColor:'#2f7040'}, container: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24, backgroundColor: '#f4f6f3' }, title: { textAlign: 'left', fontSize: 22, color: '#ffffff', margin:0 }, copy: { color: '#647168', lineHeight: 21, marginBottom: 12 }, diagnostic: { color: '#59675d', fontSize: 12, lineHeight: 18 }, card: { marginBottom: 14, borderRadius: 16, backgroundColor: '#fff', elevation: 1 }, input: { backgroundColor: '#f7f9f6', marginVertical: 8 }, workspaceButton: { marginBottom: 8, borderRadius: 22 }, section: { fontSize: 16, fontWeight: 'bold', marginTop: 16, marginBottom: 8, color: '#2b4931' }, member: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#dde4dc' }, memberInfo: { flex: 1 }, footer: { color: '#777', textAlign: 'center', marginVertical: 12 } });

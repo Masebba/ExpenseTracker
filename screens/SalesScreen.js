@@ -14,7 +14,6 @@ export default function SalesScreen() {
     const { products } = useContext(ProductsContext);
     const { sales, recordSale } = useContext(SalesContext);
     const { currency } = useContext(CurrencyContext);
-    console.log("Current currency:", currency);
 
     // Local state for the sale form.
     const [barcode, setBarcode] = useState('');
@@ -30,6 +29,7 @@ export default function SalesScreen() {
     // Sales filter state.
     const filterOptions = ['daily', 'weekly', 'monthly', 'yearly'];
     const [filterPeriod, setFilterPeriod] = useState('daily');
+    const [saleSearch, setSaleSearch] = useState('');
 
     // When the barcode changes, look up the product from inventory.
     useEffect(() => {
@@ -129,7 +129,7 @@ export default function SalesScreen() {
         }
     };
 
-    const filteredSales = sales.filter((sale) => inPeriod(sale.timestamp, filterPeriod));
+    const filteredSales = sales.filter((sale) => inPeriod(sale.timestamp, filterPeriod) && `${sale.productName || ''} ${sale.barcode || ''} ${sale.paymentMethod || ''}`.toLowerCase().includes(saleSearch.trim().toLowerCase()));
 
     const filteredTotalSales = filteredSales.reduce((sum, t) => sum + t.finalAmount, 0);
 
@@ -156,15 +156,14 @@ export default function SalesScreen() {
         return (
             <View style={styles.scannerContainer}>
                 <CameraView
-                    style={StyleSheet.absoluteFillObject}
+                    style={styles.cameraPreview}
                     facing="back"
+                    active={scanning}
                     barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39', 'code93', 'codabar', 'itf14', 'qr'] }}
                     onBarcodeScanned={handleBarCodeScanned}
                 />
-                <Text style={styles.scannerText}>Scanning... (point at a barcode)</Text>
-                <Button mode="contained" onPress={() => setScanning(false)} style={styles.button}>
-                    Cancel
-                </Button>
+                <View pointerEvents="none" style={styles.scanFrame}><Text style={styles.scannerText}>Align barcode in the frame</Text></View>
+                <Button mode="contained" onPress={() => setScanning(false)} style={styles.cancelScan}>Cancel</Button>
             </View>
         );
     }
@@ -254,6 +253,7 @@ export default function SalesScreen() {
             {/* Sales Transactions List */}
             <View style={styles.transactionsContainer}>
                 <Title>Sales Transactions</Title>
+                <TextInput label="Search product or payment method" value={saleSearch} onChangeText={setSaleSearch} style={styles.input} />
                 {filteredSales.length > 0 ? (
                     <FlatList
                         data={filteredSales}
@@ -292,6 +292,9 @@ const styles = StyleSheet.create({
     transactionText: { fontSize: 16 },
     transactionDate: { fontSize: 12, color: 'gray' },
     printButton: { marginLeft: 10 },
-    scannerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'black' },
-    scannerText: { color: 'white', fontSize: 18, marginBottom: 20 },
+    scannerContainer: { flex: 1, backgroundColor: '#111' },
+    cameraPreview: { ...StyleSheet.absoluteFillObject },
+    scanFrame:{position:'absolute',top:'35%',left:28,right:28,height:150,borderWidth:2,borderColor:'#fff',borderRadius:14,alignItems:'center',justifyContent:'flex-end',paddingBottom:10,backgroundColor:'transparent'},
+    scannerText: { color: 'white', fontSize: 13, backgroundColor:'rgba(0,0,0,0.55)',paddingHorizontal:10,paddingVertical:5,borderRadius:12 },
+    cancelScan:{position:'absolute',bottom:34,alignSelf:'center'},
 });

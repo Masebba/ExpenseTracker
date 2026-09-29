@@ -17,16 +17,20 @@ export const SalesProvider = ({ children }) => {
   const scopeId = activeWorkspace?.id || 'personal';
   const storageKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}sales` : 'expenseTracker.guest.sales';
   const [sales, setSales, hydrated] = usePersistedState(storageKey, []);
+  const syncTag = `${user?.uid || ''}:${scopeId}:${cloudSyncRevision}`;
+  const [cloudLoadedFor, setCloudLoadedFor] = React.useState('');
+  const cloudLoaded = cloudLoadedFor === syncTag;
 
   useEffect(() => {
     if (!user?.uid) return undefined;
-    return subscribeToCollection(user.uid, 'sales', (records) => setSales((current) => [...records, ...current.filter((x) => !records.some((r) => r.id === x.id))]), undefined, scopeId);
-  }, [user?.uid, setSales, scopeId, cloudSyncRevision]);
+    if (!hydrated) return undefined;
+    return subscribeToCollection(user.uid, 'sales', (records) => { setSales(records); setCloudLoadedFor(syncTag); }, (error) => console.warn('Sales cloud listener failed:', error?.message || error), scopeId);
+  }, [user?.uid, setSales, scopeId, cloudSyncRevision, hydrated, syncTag]);
 
   useEffect(() => {
-    if (!user?.uid || !cloudSyncEnabled || !hydrated) return;
+    if (!user?.uid || !cloudSyncEnabled || !hydrated || !cloudLoaded) return;
     replaceCollection(user.uid, 'sales', sales, scopeId).catch((error) => console.warn('Local sales backup failed:', error?.message || error));
-  }, [user?.uid, scopeId, cloudSyncRevision, cloudSyncEnabled, hydrated]);
+  }, [user?.uid, scopeId, cloudSyncRevision, cloudSyncEnabled, hydrated, cloudLoaded, sales]);
 
   const recordSale = useCallback(async ({ productId, quantity, discount = 0, paymentOption = 'Cash' }) => {
     const product = products.find((p) => p.id === productId);
@@ -39,16 +43,32 @@ export const SalesProvider = ({ children }) => {
     const unitPrice = product.price * (1 - disc / 100);
     const finalAmount = Math.round(unitPrice * qty * 100) / 100;
     const sale = { id: makeId('sale'), productId, productName: product.name, originalPrice: product.price, costAtSale: product.buyingPrice, finalAmount, discount: disc, quantity: qty, timestamp: nowIso(), paymentOption, currency: currency?.code || 'UGX' };
-    setSales((current) => [...current, sale]);
-    await writeRecord(user?.uid, 'sales', sale, scopeId).catch(() => {});
+    // Persist the inventory decrement before recording the sale, so a stock
+    // write failure never leaves a sale with unchanged inventory.
     await updateProduct(productId, { stock: product.stock - qty });
+    try {
+      await writeRecord(user?.uid, 'sales', sale, scopeId);
+    } catch (error) {
+      await updateProduct(productId, { stock: product.stock }).catch(() => {});
+      throw new Error(`Sale could not be saved. Inventory was restored. ${error?.message || ''}`.trim());
+    }
+    setSales((current) => [...current, sale]);
     return sale;
   }, [currency?.code, products, setSales, updateProduct, user?.uid, scopeId]);
 
   const deleteSale = useCallback(async (id) => {
-    setSales((current) => current.filter((s) => s.id !== id));
-    if (user?.uid) await deleteRecord(user.uid, 'sales', id, scopeId).catch(() => {});
-  }, [setSales, user?.uid, scopeId]);
+    const sale = sales.find((item) => item.id === id);
+    if (!sale) return;
+    const product = products.find((item) => item.id === sale.productId);
+    if (product) await updateProduct(product.id, { stock: product.stock + sale.quantity });
+    try {
+      if (user?.uid) await deleteRecord(user.uid, 'sales', id, scopeId);
+    } catch (error) {
+      if (product) await updateProduct(product.id, { stock: product.stock }).catch(() => {});
+      throw error;
+    }
+    setSales((current) => current.filter((item) => item.id !== id));
+  }, [sales, products, updateProduct, setSales, user?.uid, scopeId]);
 
   const setSalesSafe = useCallback((updater) => {
     const next = typeof updater === 'function' ? updater(sales) : updater;

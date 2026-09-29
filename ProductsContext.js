@@ -15,34 +15,37 @@ export const ProductsProvider = ({ children }) => {
   const categoriesKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}productCategories` : 'expenseTracker.guest.productCategories';
   const [products, setProducts, hydrated] = usePersistedState(storageKey, []);
   const [categories, setCategories, categoriesHydrated] = usePersistedState(categoriesKey, ['General']);
-  const [cloudLoaded, setCloudLoaded] = useState(false);
+  const syncTag = `${user?.uid || ''}:${scopeId}:${cloudSyncRevision}`;
+  const [cloudLoadedFor, setCloudLoadedFor] = useState('');
+  const cloudLoaded = cloudLoadedFor === syncTag;
 
-  useEffect(() => setCloudLoaded(false), [user?.uid, scopeId]);
   useEffect(() => {
     if (!user?.uid) return undefined;
+    if (!hydrated) return undefined;
     return subscribeToCollection(user.uid, 'products', (records) => {
-      setProducts((current) => [...records, ...current.filter((item) => !records.some((r) => r.id === item.id))]);
-      setCloudLoaded(true);
-    }, undefined, scopeId);
-  }, [user?.uid, scopeId, cloudSyncRevision]);
+      setProducts(records);
+      setCloudLoadedFor(syncTag);
+    }, (error) => console.warn('Product cloud listener failed:', error?.message || error), scopeId);
+  }, [user?.uid, scopeId, cloudSyncRevision, hydrated, setProducts, syncTag]);
 
   useEffect(() => {
-    if (!user?.uid || !cloudSyncEnabled || !hydrated) return;
+    if (!user?.uid || !cloudSyncEnabled || !hydrated || !cloudLoaded) return;
     Promise.all([
       replaceCollection(user.uid, 'products', products, scopeId),
       replaceCollection(user.uid, 'productCategories', categories.map((name) => ({ id: name.toLowerCase().replace(/[^a-z0-9]+/g, '_'), name })), scopeId),
     ]).catch((error) => console.warn('Local product backup failed:', error?.message || error));
-  }, [user?.uid, scopeId, cloudSyncRevision, cloudSyncEnabled, hydrated, categories]);
+  }, [user?.uid, scopeId, cloudSyncRevision, cloudSyncEnabled, hydrated, cloudLoaded, products, categories]);
   useEffect(() => {
     if (!user?.uid) return undefined;
+    if (!categoriesHydrated) return undefined;
     return subscribeToCollection(user.uid, 'productCategories', (records) => {
-      if (records?.length) setCategories(records.map((r) => r.name));
-    }, undefined, scopeId);
-  }, [user?.uid, scopeId, cloudSyncRevision]);
+      setCategories(records.map((r) => r.name));
+    }, (error) => console.warn('Category cloud listener failed:', error?.message || error), scopeId);
+  }, [user?.uid, scopeId, cloudSyncRevision, categoriesHydrated, setCategories]);
 
   const save = useCallback(async (record) => {
     if (!user?.uid) return;
-    try { await writeRecord(user.uid, 'products', record, scopeId); } catch (e) { console.warn('Product cloud sync failed:', e?.message || e); }
+    await writeRecord(user.uid, 'products', record, scopeId);
   }, [user?.uid, scopeId, cloudSyncRevision]);
 
   const addProduct = useCallback(async (data) => {
@@ -54,37 +57,34 @@ export const ProductsProvider = ({ children }) => {
     if (!Number.isFinite(buyingPrice) || buyingPrice < 0) throw new Error('Buying price cannot be negative.');
     if (stock < 0) throw new Error('Stock cannot be negative.');
     const product = { id: data.id || makeId('prod'), barcode: String(data.barcode || '').trim(), name: data.name.trim(), price: Math.round(price * 100) / 100, buyingPrice: Math.round(buyingPrice * 100) / 100, stock, category: String(data.category || 'General').trim() || 'General', createdAt: nowIso(), updatedAt: nowIso() };
-    setProducts((current) => [...current, product]);
     await save(product);
+    setProducts((current) => [...current, product]);
     return product;
   }, [save, setProducts]);
 
   const updateProduct = useCallback(async (id, data) => {
-    let updated;
-    setProducts((current) => {
-      updated = current.map((p) => p.id === id ? { ...p, ...data, price: data.price === undefined ? p.price : toNumber(data.price, p.price), buyingPrice: data.buyingPrice === undefined ? p.buyingPrice : toNumber(data.buyingPrice, p.buyingPrice), stock: data.stock === undefined ? p.stock : toInteger(data.stock, p.stock), updatedAt: nowIso() } : p);
-      return updated;
-    });
-    const record = updated?.find((p) => p.id === id);
-    if (record) await save(record);
+    const current = products.find((item) => item.id === id);
+    if (!current) return;
+    const record = { ...current, ...data, price: data.price === undefined ? current.price : toNumber(data.price, current.price), buyingPrice: data.buyingPrice === undefined ? current.buyingPrice : toNumber(data.buyingPrice, current.buyingPrice), stock: data.stock === undefined ? current.stock : toInteger(data.stock, current.stock), updatedAt: nowIso() };
+    if (!Number.isInteger(record.stock) || record.stock < 0 || !Number.isFinite(record.price) || record.price <= 0 || !Number.isFinite(record.buyingPrice) || record.buyingPrice < 0) throw new Error('Product stock and prices are invalid.');
+    await save(record);
+    setProducts((items) => items.map((item) => item.id === id ? record : item));
   }, [save, setProducts]);
 
   const deleteProduct = useCallback(async (id) => {
+    if (user?.uid) await deleteRecord(user.uid, 'products', id, scopeId);
     setProducts((current) => current.filter((p) => p.id !== id));
-    if (user?.uid) await deleteRecord(user.uid, 'products', id, scopeId).catch(() => {});
   }, [setProducts, user?.uid, scopeId]);
 
   const adjustStock = useCallback(async (id, delta, reason = 'manual') => {
     const amount = toInteger(delta, 0);
-    let updated;
-    setProducts((current) => current.map((p) => {
-      if (p.id !== id) return p;
-      const nextStock = p.stock + amount;
-      if (nextStock < 0) throw new Error(`Insufficient stock for ${p.name}.`);
-      updated = { ...p, stock: nextStock, updatedAt: nowIso(), lastStockAdjustment: { amount, reason, timestamp: nowIso() } };
-      return updated;
-    }));
-    if (updated) await save(updated);
+    const current = products.find((item) => item.id === id);
+    if (!current) throw new Error('Product could not be found.');
+    const nextStock = current.stock + amount;
+    if (nextStock < 0) throw new Error(`Insufficient stock for ${current.name}.`);
+    const updated = { ...current, stock: nextStock, updatedAt: nowIso(), lastStockAdjustment: { amount, reason, timestamp: nowIso() } };
+    await save(updated);
+    setProducts((items) => items.map((item) => item.id === id ? updated : item));
     return updated;
   }, [save, setProducts]);
 
@@ -109,14 +109,15 @@ export const ProductsProvider = ({ children }) => {
     products.filter((p) => p.category === name).forEach((p) => save({ ...p, category: 'General', updatedAt: nowIso() }));
   }, [products, save, setCategories, setProducts]);
 
-  const setProductsSafe = useCallback((updater) => {
+  const setProductsSafe = useCallback(async (updater) => {
     const next = typeof updater === 'function' ? updater(products) : updater;
     const previousIds = new Set(products.map((p) => p.id));
-    setProducts(next);
     if (user?.uid) {
-      next.forEach((p) => { writeRecord(user.uid, 'products', p, scopeId).catch(() => {}); previousIds.delete(p.id); });
-      previousIds.forEach((id) => deleteRecord(user.uid, 'products', id, scopeId).catch(() => {}));
+      await Promise.all(next.map((p) => writeRecord(user.uid, 'products', p, scopeId)));
+      await Promise.all(products.filter((p) => !next.some((item) => item.id === p.id)).map((p) => deleteRecord(user.uid, 'products', p.id, scopeId)));
     }
+    next.forEach((p) => previousIds.delete(p.id));
+    setProducts(next);
   }, [products, setProducts, user?.uid, scopeId]);
 
   const value = useMemo(() => ({ products, setProducts: setProductsSafe, addProduct, updateProduct, deleteProduct, adjustStock, categories, addCategory, updateCategory, deleteCategory, hydrated, categoriesHydrated, cloudLoaded }), [products, setProductsSafe, addProduct, updateProduct, deleteProduct, adjustStock, categories, addCategory, updateCategory, deleteCategory, hydrated, categoriesHydrated, cloudLoaded]);

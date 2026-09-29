@@ -11,7 +11,10 @@
     },
     "android": {
       "package": "com.masebba.ExpenseTracker",
+      "versionCode": 2,
       "backgroundColor": "#ffffff",
+      "softwareKeyboardLayoutMode": "resize",
+      "allowBackup": false,
       "permissions": [
         "android.permission.CAMERA"
       ]
@@ -49,7 +52,9 @@
           "configureAndroidBackup": true,
           "faceIDPermission": "Allow $(PRODUCT_NAME) to access your Face ID data."
         }
-      ]
+      ],
+      "expo-sharing",
+      "expo-document-picker"
     ]
   }
 }
