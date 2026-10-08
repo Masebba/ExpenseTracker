@@ -1,11 +1,11 @@
 // screens/LoginScreen.js
 import React, { useState, useContext } from 'react';
-import { View, StyleSheet, Image, Alert } from 'react-native';
+import { ScrollView, StyleSheet, Image, Alert } from 'react-native';
 import { TextInput, Button, Title, Text } from 'react-native-paper';
 import { AuthContext } from '../AuthContext';
 
 export default function LoginScreen({ navigation }) {
-  const { signIn } = useContext(AuthContext);
+  const { signIn, startGuestMode, guestTransferError } = useContext(AuthContext);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -21,7 +21,7 @@ export default function LoginScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Image source={require('../assets/logo.png')} style={styles.logo} />
       <Title style={styles.title}>Login</Title>
       <TextInput
@@ -54,12 +54,18 @@ export default function LoginScreen({ navigation }) {
       <Text onPress={() => navigation.navigate('Signup')} style={styles.link}>
         Don't have an account? Sign Up
       </Text>
-    </View>
+      <Text style={styles.guestCopy}>You can use a personal ledger without creating an account. Records stay on this device unless you export or back them up.</Text>
+      <Text style={styles.guestCopy}>If you started a guest ledger on this device, signing in copies it into this account's local records. Existing account records with matching IDs are kept.</Text>
+      {!!guestTransferError && <Text accessibilityRole="alert" style={styles.transferError}>{guestTransferError}</Text>}
+      <Button mode="outlined" onPress={() => startGuestMode().catch((error) => Alert.alert('Could not start local mode', error.message || 'Try again.'))} style={styles.guestButton}>
+        Continue without an account
+      </Button>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#f4f6f3' },
+  container: { flexGrow: 1, justifyContent: 'center', padding: 24, backgroundColor: '#f4f6f3' },
   logo: {
     width: 100,
     height: 100,
@@ -86,4 +92,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     textAlign: 'center'
   },
+  guestCopy: { color: '#667268', textAlign: 'center', fontSize: 12, lineHeight: 18, marginTop: 22 },
+  transferError: { color: '#b3261e', textAlign: 'center', fontSize: 12, lineHeight: 18, marginTop: 8 },
+  guestButton: { marginTop: 8, borderRadius: 22 },
 });

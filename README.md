@@ -1,6 +1,6 @@
 # ExpenseTracker
 
-ExpenseTracker supports personal use and multi-organisation workspaces. A person can keep a private personal ledger, create or join multiple companies/organisations, and switch between workspaces. Each workspace has its own transactions, inventory, sales, and orders. Records are stored on the device in the app sandbox and can be backed up to a user-selected folder. Record cloud sync is deliberately disabled in this release until conflict resolution for offline edits and deletions is implemented.
+ExpenseTracker supports account-free personal use and multi-organisation workspaces. A person can start a private local ledger without creating an account, then optionally sign in or register for account features such as creating or joining companies/organisations. Guest and signed-in personal ledger records are stored locally in private app storage and are available offline. This is not a user-browsable folder, and uninstalling may remove the local copy. When a guest chooses account access, the app copies guest records into the signed-in account's local data on that device, preserving existing account records when IDs overlap. Users can export a JSON file or select an Android document-provider folder for an additional backup; this folder is optional and controlled by the user. Folder backups contain local records and settings for the guest session or signed-in account, not cloud workspace records. Each cloud workspace has its own transactions, inventory, sales, and orders shared with members according to their roles. Record cloud sync is deliberately disabled in this release until conflict resolution for offline edits and deletions is implemented.
 
 ## Install
 
@@ -9,7 +9,9 @@ npm install
 npx expo start
 ```
 
-The project uses Expo SDK 57. Firebase JS SDK 12+ is required. Deploy `firestore.rules` before relying on cloud sync, organisation memberships, or developer adverts. Profile and organisation images stay on the device and do not require Storage deployment.
+The project uses Expo SDK 57. Firebase JS SDK 12+ is required. Deploy `firestore.rules` before relying on cloud sync, organisation memberships, developer adverts, or administrator-published Terms of Service. Deploy `storage.rules` for developer advert image uploads. Profile and organisation images stay on the device.
+
+The app chooses its ledger currency from the device's regional locale, falling back to its time-zone region when the locale has no country. Signup shows the detected region and stores it in the account profile; guest sessions use the current device settings. Currency and date/time display use the device locale without requesting precise location access. The converter lists the detected currency first and still allows selecting other currencies for conversion.
 
 ## Data model
 
@@ -27,11 +29,11 @@ Each workspace stores:
 - sales
 - orders
 
-The app keeps a device-local copy scoped to the signed-in user and workspace, so different organisation records remain separate on a device.
+The app keeps a device-local copy scoped to the signed-in user and workspace, so different organisation records remain separate on a device. Personal ledger records stay local in this release. Organization records, membership, profile fields, organization metadata, invitations, and advertisements use Firebase for the features that need them. Review [PRIVACY_POLICY.md](./PRIVACY_POLICY.md) for the current data flow and limitations.
 
 ## Important
 
-The Firebase project must have Authentication and Firestore enabled. Deploy the current `firestore.rules` for organisation membership, private invitations, and developer-only advert publishing. Profile and organisation images are copied to each device’s app folder; this app’s profile/logo features do not require Firebase Storage or Storage rules. Inviting a member currently requires that person to sign up first, using the same email address. Existing single-user business data remains under its original personal account; it is not automatically moved into a new organisation. The notification bell is an in-app activity inbox; push notifications require additional platform setup. `services/cloudSync.js` contains the explicit `CLOUD_SYNC_RELEASE_BLOCKED` gate; do not remove it until offline edits/deletions and concurrent-device conflict behavior are designed and verified.
+The Firebase project must have Authentication and Firestore enabled. Deploy the current `firestore.rules` for organisation membership, private invitations, developer-only advert publishing, and public read/developer-only write access to the Terms of Service document. Developer Studio lets the developer account publish the terms shown in Workspaces and Settings. Developer advert images are uploaded to Firebase Storage under the developer's own `users/{uid}/ads/` folder; deploy the repository's `storage.rules` to allow this upload. Profile and organisation images are copied to each device's app folder. Inviting a member currently requires that person to sign up first, using the same email address. Existing single-user business data remains under its original personal account; it is not automatically moved into a new organisation. The notification bell is an in-app activity inbox; push notifications require additional platform setup. `services/cloudSync.js` contains the explicit `CLOUD_SYNC_RELEASE_BLOCKED` gate; do not remove it until offline edits/deletions and concurrent-device conflict behavior are designed and verified.
 
 ### Developer ad publishing
 
@@ -42,7 +44,7 @@ The Developer Studio has no public navigation entry. Access is controlled by the
 3. Save the document. The app listens to this profile and should reveal the private Developer Studio route automatically; no sign-out, token refresh, or custom claim is needed.
 4. If it does not appear, check that Firebase Authentication and the app use the same Firebase project, and that the document ID equals that account's UID. A `developerAdmin` field added to an unrelated user document has no effect.
 
-Publish the repository's `firestore.rules` to the same Firebase project configured in `.env` before using ad publishing. From a terminal with Firebase CLI installed and this project selected, run `firebase deploy --only firestore:rules`; alternatively paste the complete rules file into **Firebase Console → Firestore Database → Rules → Publish**. Publishing writes is rejected by design while the project's deployed rules are old. The rules check `users/{uid}.developerAdmin == true` and prevent users from setting that field through the app. Only an administrator changing the profile in Firebase Console can grant this access. Organisation owners and staff cannot publish public adverts.
+Publish the repository's `firestore.rules` and `storage.rules` to the same Firebase project configured in `.env` before using advert publishing and image upload. From a terminal with Firebase CLI installed and this project selected, run `firebase deploy --only firestore:rules,storage`; alternatively paste the Firestore rules into **Firebase Console → Firestore Database → Rules → Publish** and the Storage rules into **Firebase Console → Storage → Rules → Publish**. Publishing writes is rejected by design while the project's deployed Firestore rules are old. The Firestore rules check `users/{uid}.developerAdmin == true` and prevent users from setting that field through the app. Only an administrator changing the profile in Firebase Console can grant this access. Organisation owners and staff cannot publish public adverts.
 
 Customer and supplier profiles, invoices, and supplier purchase bills are stored locally per account and workspace. Cloud sync for app records is disabled in this release. Organization Firestore rules include the `customers`, `suppliers`, `invoices`, and `purchases` collections for a future sync release.
 

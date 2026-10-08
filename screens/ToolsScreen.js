@@ -4,7 +4,7 @@ import { Button, Card, Menu, Text, TextInput, Title } from 'react-native-paper';
 import { AuthContext } from '../AuthContext';
 import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
-import { CURRENCY_SYMBOLS, inPeriod, toNumber } from '../utils/appUtils';
+import { CURRENCY_SYMBOLS, currencyFromCode, formatMoney, inPeriod, toNumber } from '../utils/appUtils';
 import usePersistedState from '../utils/usePersistedState';
 
 const currencies = Object.keys(CURRENCY_SYMBOLS);
@@ -20,6 +20,10 @@ export default function ToolsScreen({ route }) {
   const [exchangeRate, setExchangeRate] = useState('');
   const [rateStatus, setRateStatus] = useState('');
   const [menu, setMenu] = useState(null);
+  const orderedCurrencies = useMemo(
+    () => [currency?.code, ...currencies.filter((code) => code !== currency?.code)],
+    [currency?.code],
+  );
   const budgetKey = `expenseTracker.${user?.uid || 'guest'}.${activeWorkspace?.id || 'personal'}.spendingTargets`;
   const [savedTargets, setSavedTargets, budgetHydrated] = usePersistedState(budgetKey, { daily: 0, weekly: 0, monthly: 0 });
   const [budgetInput, setBudgetInput] = useState('');
@@ -29,6 +33,15 @@ export default function ToolsScreen({ route }) {
   const converted = toNumber(amount, 0) * rate;
 
   useEffect(() => { if (budgetHydrated) setBudgetInput(savedTargets?.[targetPeriod] ? String(savedTargets[targetPeriod]) : ''); }, [budgetHydrated, savedTargets, targetPeriod]);
+  useEffect(() => {
+    if (!currency?.code) return;
+    setFrom(currency.code);
+    setTo((current) =>
+      current === currency.code
+        ? currencies.find((code) => code !== currency.code) || 'USD'
+        : current,
+    );
+  }, [currency?.code]);
   useEffect(() => {
     if (mode !== 'converter') return undefined;
     let active = true;
@@ -60,16 +73,16 @@ export default function ToolsScreen({ route }) {
         <TextInput label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" style={styles.input} />
         <View style={styles.currencyRow}>
           <Menu visible={menu === 'from'} onDismiss={() => setMenu(null)} anchor={<Button mode="outlined" onPress={() => setMenu('from')}>{from}  ▾</Button>}>
-            {currencies.map((code) => <Menu.Item key={code} title={`${CURRENCY_SYMBOLS[code]}  ${code}`} onPress={() => { setFrom(code); setMenu(null); }} />)}
+            {orderedCurrencies.map((code) => <Menu.Item key={code} title={`${currencyFromCode(code).symbol}  ${code}`} onPress={() => { setFrom(code); setMenu(null); }} />)}
           </Menu>
           <Text style={styles.arrow}>→</Text>
           <Menu visible={menu === 'to'} onDismiss={() => setMenu(null)} anchor={<Button mode="outlined" onPress={() => setMenu('to')}>{to}  ▾</Button>}>
-            {currencies.map((code) => <Menu.Item key={code} title={`${CURRENCY_SYMBOLS[code]}  ${code}`} onPress={() => { setTo(code); setMenu(null); }} />)}
+            {orderedCurrencies.map((code) => <Menu.Item key={code} title={`${currencyFromCode(code).symbol}  ${code}`} onPress={() => { setTo(code); setMenu(null); }} />)}
           </Menu>
         </View>
         <TextInput label={`1 ${from} = ? ${to}`} value={exchangeRate} onChangeText={setExchangeRate} keyboardType="decimal-pad" style={styles.input} />
         <Text style={styles.rateStatus}>{rateStatus}</Text>
-        <View style={styles.result}><Text style={styles.resultLabel}>Converted amount</Text><Text style={styles.resultAmount}>{CURRENCY_SYMBOLS[to]} {converted.toLocaleString(undefined, { maximumFractionDigits: 2 })}</Text></View>
+        <View style={styles.result}><Text style={styles.resultLabel}>Converted amount</Text><Text style={styles.resultAmount}>{currencyFromCode(to).symbol} {converted.toLocaleString(undefined, { maximumFractionDigits: 2 })}</Text></View>
       </Card.Content>
     </Card>}
 
@@ -78,10 +91,10 @@ export default function ToolsScreen({ route }) {
         <View style={styles.targets}>{['daily','weekly','monthly'].map((period) => <Button key={period} compact mode={targetPeriod === period ? 'contained' : 'outlined'} onPress={() => setTargetPeriod(period)}>{period[0].toUpperCase()+period.slice(1)}</Button>)}</View>
         <TextInput label={`${targetPeriod[0].toUpperCase()+targetPeriod.slice(1)} target (${currency?.code || 'UGX'})`} value={budgetInput} onChangeText={setBudgetInput} keyboardType="decimal-pad" style={styles.input} />
         <Button mode="contained" compact onPress={saveBudget} style={styles.button}>Save target</Button>
-        <View style={styles.budgetRow}><Text>This {targetPeriod}</Text><Text style={styles.spent}>{currency?.symbol} {spent.toLocaleString()}</Text></View>
+        <View style={styles.budgetRow}><Text>This {targetPeriod}</Text><Text style={styles.spent}>{formatMoney(spent, currency)}</Text></View>
         {savedBudget > 0 && <>
           <View style={styles.track}><View style={[styles.fill, { width: `${progress}%`, backgroundColor: progress >= 100 ? '#c34c3a' : '#3d8050' }]} /></View>
-          <View style={styles.budgetRow}><Text>Remaining</Text><Text style={styles.remaining}>{currency?.symbol} {remaining.toLocaleString()}</Text></View>
+          <View style={styles.budgetRow}><Text>Remaining</Text><Text style={styles.remaining}>{formatMoney(remaining, currency)}</Text></View>
         </>}
       </Card.Content>
     </Card>}

@@ -4,17 +4,18 @@ import { Title, TextInput, Button, Text, Modal, Portal, Switch } from 'react-nat
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AuthContext } from '../AuthContext';
-import CurrencySettings from '../CurrencySettings';
 import { AppFeaturesContext } from '../AppFeaturesContext';
-import { saveImageLocally } from '../utils/appUtils';
+import { saveImageLocally, contentWidthStyle, isUsableLocalImage } from '../utils/appUtils';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { clearExternalBackupFolder, getExternalBackupFolder, getExternalBackupStatus, selectExternalBackupFolder, writeExternalBackup } from '../services/externalBackup';
+import { clearExternalBackupFolder, getExternalBackupFolder, getExternalBackupStatus, selectExternalBackupFolder, subscribeExternalBackupStatus, writeExternalBackup } from '../services/externalBackup';
 import { restoreBackup } from '../services/backupRestore';
+import TermsOfServiceButton from '../components/TermsOfServiceButton';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 
-export default function SettingsScreen() {
-  const { user, profileImage, updateProfileImage, signOut, updateUserProfile, updateUserData, personalDetails, updatePersonalDetails, businessProfile, updatePersonalBusinessProfile, activeWorkspace, exportMyData, deleteMyAccount } = useContext(AuthContext);
+export default function SettingsScreen({ navigation }) {
+  const { user, guestMode, openAccountAccess, exitGuestMode, reloadLocalData, profileImage, updateProfileImage, signOut, updateUserProfile, updateUserData, personalDetails, updatePersonalDetails, businessProfile, updatePersonalBusinessProfile, activeWorkspace, exportMyData, deleteMyAccount } = useContext(AuthContext);
+  const storageOwner = user?.uid || (guestMode ? 'guest' : null);
   const isPersonalWorkspace = activeWorkspace?.id === 'personal';
   const { cloudSyncEnabled, toggleCloudSync } = useContext(AppFeaturesContext);
   const [profilePic, setProfilePic] = useState(null);
@@ -28,6 +29,8 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [businessForm, setBusinessForm] = useState({ legalName:'', email:'', phone:'', alternatePhone:'', address:'', city:'', country:'', taxId:'', registrationNumber:'', website:'', contactName:'', contactTitle:'', paymentMethod:'', paymentDetails:'' });
   const [personalForm, setPersonalForm] = useState({ alternatePhone:'', jobTitle:'', address:'', city:'', country:'', taxId:'', website:'', paymentMethod:'', paymentDetails:'' });
+  const [showPersonalDetails, setShowPersonalDetails] = useState(false);
+  const [showBusinessDetails, setShowBusinessDetails] = useState(false);
   const [externalFolder, setExternalFolder] = useState(null);
   const [backupStatus, setBackupStatus] = useState('');
 
@@ -43,9 +46,11 @@ export default function SettingsScreen() {
   useEffect(() => { setBusinessForm((form) => ({ ...form, ...(businessProfile || {}) })); }, [businessProfile]);
   useEffect(() => { setPersonalForm((form) => ({ ...form, ...(personalDetails || {}) })); }, [personalDetails]);
   useFocusEffect(useCallback(() => {
-    getExternalBackupFolder(user?.uid).then(setExternalFolder).catch(() => {});
-    getExternalBackupStatus(user?.uid).then((status) => setBackupStatus(status || '')).catch(() => {});
-  }, [user?.uid]));
+    getExternalBackupFolder(storageOwner).then(setExternalFolder).catch(() => {});
+    getExternalBackupStatus(storageOwner).then((status) => setBackupStatus(status || '')).catch(() => {});
+  }, [storageOwner]));
+
+  useEffect(() => subscribeExternalBackupStatus(storageOwner, (status) => setBackupStatus(status || '')), [storageOwner]);
 
   const saveBusinessDetails = async () => {
     try { setSaving(true); await updatePersonalBusinessProfile(businessForm); Alert.alert('Saved', 'Your invoice business details have been saved.'); }
@@ -61,14 +66,15 @@ export default function SettingsScreen() {
 
   const chooseExternalFolder = async () => {
     if (Platform.OS !== 'android') { Alert.alert('Folder picker unavailable', 'Choosing a Google Drive, Dropbox or external folder is supported through the Android system file picker.'); return; }
-    try { setSaving(true); const uri = await selectExternalBackupFolder(user?.uid); if (uri) { setExternalFolder(uri); Alert.alert('Backup folder connected', 'Your app data will continue saving on this device and an updated backup will also be written to the selected folder.'); } }
+    try { setSaving(true); const uri = await selectExternalBackupFolder(storageOwner); if (uri) { setExternalFolder(uri); Alert.alert('Backup folder connected', 'Your app data will continue saving on this device and an updated backup will also be written to the selected folder.'); } }
     catch (error) { Alert.alert('Could not connect folder', error.message || 'Try again.'); }
     finally { setSaving(false); }
   };
 
   const disconnectExternalFolder = async () => {
-    await clearExternalBackupFolder(user?.uid);
+    await clearExternalBackupFolder(storageOwner);
     setExternalFolder(null);
+    setBackupStatus('External backup disconnected. The existing backup file was left in the selected folder.');
   };
 
   const exportData = async () => {
@@ -104,10 +110,10 @@ export default function SettingsScreen() {
       const result = await DocumentPicker.getDocumentAsync({ type: ['application/json', 'text/json', '*/*'], copyToCacheDirectory: true });
       if (result.canceled || !result.assets?.[0]?.uri) return;
       const backupText = await FileSystem.readAsStringAsync(result.assets[0].uri);
-      Alert.alert('Restore backup?', 'Records in this backup will replace matching data on this device. Current device data is backed up temporarily and recovered if restoration fails. You will be signed out after a successful restore so the app can reload the restored records.', [
+      Alert.alert('Restore backup?', `Records in this backup will replace matching data on this device. Current device data is backed up temporarily and recovered if restoration fails.${user?.uid ? ' You will be signed out after a successful restore so the app can reload the restored records.' : ' The local ledger will reload after a successful restore.'}`, [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Restore', style: 'destructive', onPress: async () => {
-          try { setSaving(true); await restoreBackup(user?.uid, backupText); await signOut(); }
+          try { setSaving(true); await restoreBackup(storageOwner, backupText); if (user?.uid) await signOut(); else reloadLocalData(); }
           catch (error) { Alert.alert('Restore failed', error.message || 'The backup could not be restored.'); }
           finally { setSaving(false); }
         } },
@@ -121,7 +127,7 @@ export default function SettingsScreen() {
   };
 
   const retryBackup = async () => {
-    try { setSaving(true); const written = await writeExternalBackup(user?.uid); setBackupStatus(written ? 'Backup updated just now.' : 'Choose a backup folder to enable external backups.'); }
+    try { setSaving(true); const written = await writeExternalBackup(storageOwner); setBackupStatus(written ? 'Backup updated just now.' : 'Choose a backup folder to enable external backups.'); }
     catch (error) { setBackupStatus(`Backup failed: ${error.message || 'Try again.'}`); }
     finally { setSaving(false); }
   };
@@ -160,11 +166,12 @@ export default function SettingsScreen() {
   return <SafeAreaView edges={['top']} style={styles.safeArea}><KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <View style={styles.pageHeader}><Title style={styles.title}>Settings</Title></View>
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-    <TouchableOpacity onPress={pickImage} disabled={saving} style={styles.avatarButton} accessibilityLabel="Choose profile photo">
-      {profilePic ? <Image source={{ uri: profilePic }} style={styles.profileImage} /> : <View style={[styles.profileImage, styles.placeholder]}><MaterialCommunityIcons name="account-circle-outline" size={56} color="#7a897e" /></View>}
+    {user && <TouchableOpacity onPress={pickImage} disabled={saving} style={styles.avatarButton} accessibilityLabel="Choose profile photo">
+      {profilePic && isUsableLocalImage(profilePic, FileSystem.documentDirectory) ? <Image source={{ uri: profilePic }} style={styles.profileImage} onError={() => setProfilePic(null)} /> : <View style={[styles.profileImage, styles.placeholder]}><MaterialCommunityIcons name="account-circle-outline" size={56} color="#7a897e" /></View>}
     </TouchableOpacity>
-    <Text style={styles.photoHint}>{profilePic ? 'Change profile photo' : 'Add a profile photo'}</Text>
-    {isPersonalWorkspace && <View style={styles.profileDetails}>
+    }
+    {user && <Text style={styles.photoHint}>{profilePic && isUsableLocalImage(profilePic, FileSystem.documentDirectory) ? 'Change profile photo' : 'Add a profile photo'}</Text>}
+    {user && isPersonalWorkspace && <View style={styles.profileDetails}>
       <Text style={styles.sectionTitle}>Your account</Text>
       <Text style={styles.infoText}>Email: {email}</Text>
       <View style={styles.row}><Text style={styles.infoText}>Name: {displayName || 'Not set'}</Text>{!isEditingUserName && <Button mode="outlined" onPress={() => setIsEditingUserName(true)}>Update Name</Button>}</View>
@@ -172,33 +179,42 @@ export default function SettingsScreen() {
       <View style={styles.row}><Text style={styles.infoText}>Phone: {phone || 'Not set'}</Text>{!isEditingPhone && <Button mode="outlined" onPress={() => setIsEditingPhone(true)}>Update Phone</Button>}</View>
       {isEditingPhone && <View style={styles.editRow}><TextInput label="Phone Number" value={phone} onChangeText={setPhone} style={styles.input} keyboardType="phone-pad" /><Button mode="contained" onPress={handleSavePhone} loading={saving}>Save</Button></View>}
     </View>}
-    {isPersonalWorkspace && <View style={styles.personalDetails}>
-      <Text style={styles.sectionTitle}>Optional personal details</Text>
+    {user && isPersonalWorkspace && <View style={styles.personalDetails}>
+      <Button mode="outlined" icon={showPersonalDetails ? 'chevron-up' : 'account-edit-outline'} onPress={() => setShowPersonalDetails((visible) => !visible)}>
+        {showPersonalDetails ? 'Close optional personal details' : 'Optional personal details'}
+      </Button>
+      {showPersonalDetails && <>
       <Text style={styles.storageHint}>You can add these to invoices when using your personal details as the issuer.</Text>
       {Object.keys(personalForm).map((key)=><TextInput key={key} label={{alternatePhone:'Alternate phone',jobTitle:'Job title or role',address:'Address',city:'City or town',country:'Country',taxId:'Personal tax ID (optional)',website:'Website',paymentMethod:'Preferred payment method',paymentDetails:'Payment instructions or account details'}[key]} value={personalForm[key]||''} onChangeText={(value)=>setPersonalForm((form)=>({...form,[key]:value}))} style={styles.input} />)}
       <Button mode="outlined" compact loading={saving} onPress={savePersonalDetails}>Save personal details</Button>
+      </>}
     </View>}
-    {!isPersonalWorkspace && <View style={styles.detailsSection}>
-      <Text style={styles.storageTitle}>Business details for invoices</Text>
-      <Text style={styles.storageHint}>These details are used as the issuer on invoices created in your personal workspace.</Text>
+    {user && isPersonalWorkspace && <View style={styles.detailsSection}>
+      <Button mode="outlined" icon={showBusinessDetails ? 'chevron-up' : 'briefcase-edit-outline'} onPress={() => setShowBusinessDetails((visible) => !visible)}>
+        {showBusinessDetails ? 'Close business details' : 'My business details for invoices'}
+      </Button>
+      {showBusinessDetails && <>
+      <Text style={styles.storageHint}>Optional details used when you create an invoice from your personal workspace.</Text>
       {Object.keys(businessForm).map((key)=><TextInput key={key} label={{legalName:'Registered business name',email:'Business email',phone:'Business phone',alternatePhone:'Alternate business phone',address:'Business address',city:'City or town',country:'Country',taxId:'Tax identification number',registrationNumber:'Company registration number',website:'Website',contactName:'Invoice contact person',contactTitle:'Contact person role',paymentMethod:'Preferred payment method',paymentDetails:'Payment instructions or account details'}[key]} value={businessForm[key]||''} onChangeText={(value)=>setBusinessForm((form)=>({...form,[key]:value}))} style={styles.input} />)}
       <Button mode="contained" compact loading={saving} onPress={saveBusinessDetails}>Save business details</Button>
+      </>}
     </View>}
-    <CurrencySettings />
-    <Text style={styles.helper}>Changing currency sets the display currency for future entries. Existing amounts are not automatically converted.</Text>
+    {user && !isPersonalWorkspace && <View style={styles.detailsSection}><Text style={styles.storageHint}>Company and organisation invoice details are managed with each workspace.</Text><Button compact mode="outlined" onPress={()=>navigation.navigate('Workspaces')}>Manage workspace details</Button></View>}
+    <Text style={styles.helper}>Currency and local date/time formatting follow your device’s region settings.</Text>
+    <TermsOfServiceButton style={styles.button} />
     <View style={styles.storageCard}>
       <Text style={styles.storageTitle}>Data storage</Text>
-      <View style={styles.storageChoice}><MaterialCommunityIcons name="cellphone-check" size={20} color="#315d3b"/><View style={{flex:1,marginLeft:9}}><Text style={styles.infoText}>This device · default</Text><Text style={styles.storageHint}>Your records continue to save locally for offline access.</Text></View></View>
-      <View style={styles.storageRow}><View style={{ flex: 1 }}><Text style={styles.infoText}>ExpenseTracker cloud sync</Text><Text style={styles.storageHint}>{cloudSyncEnabled ? 'Also syncing this account through Firebase' : 'Paused before publication while conflict-safe sync is completed. Your records are saved on this device.'}</Text></View><Switch value={cloudSyncEnabled} disabled onValueChange={(value) => toggleCloudSync(value).catch((error) => Alert.alert('Could not update backup', error.message))} /></View>
-      <View style={styles.externalRow}><View style={{flex:1}}><Text style={styles.infoText}>External folder backup</Text><Text style={styles.storageHint}>{externalFolder ? 'Connected · updated automatically' : 'Optional · Google Drive, Dropbox or another Android file provider'}</Text></View><Button compact mode={externalFolder?'outlined':'contained'} disabled={saving} onPress={externalFolder?disconnectExternalFolder:chooseExternalFolder}>{externalFolder?'Disconnect':'Choose folder'}</Button></View>
-      <Text style={styles.storageHint}>The selected folder receives an ExpenseTracker JSON backup. Choose a provider available in your Android system file picker.</Text>
-      <View style={styles.externalRow}><Text style={[styles.storageHint,{flex:1}]}>{backupStatus}</Text><Button compact disabled={saving || !externalFolder} onPress={retryBackup}>Back up now</Button></View>
+      <View style={styles.storageChoice}><MaterialCommunityIcons name="cellphone-check" size={20} color="#315d3b"/><Text style={styles.infoText}>This device · default</Text></View>
+      {user && <View style={styles.storageRow}><Text style={[styles.infoText, { flex: 1 }]}>Workspace record sync</Text><Switch value={cloudSyncEnabled} disabled onValueChange={(value) => toggleCloudSync(value).catch((error) => Alert.alert('Could not update backup', error.message))} /></View>}
+      <View style={styles.externalRow}><View style={{flex:1}}><Text style={styles.infoText}>External folder backup</Text>{!!externalFolder && <Text style={styles.storageHint}>Connected</Text>}</View><Button compact mode={externalFolder?'outlined':'contained'} disabled={saving} onPress={externalFolder?disconnectExternalFolder:chooseExternalFolder}>{externalFolder?'Disconnect':'Choose folder'}</Button></View>
+      <View style={styles.externalRow}><Text style={[styles.storageHint,{flex:1}]}>{backupStatus || (externalFolder ? 'No successful backup recorded yet.' : 'No external backup configured.')}</Text><Button compact disabled={saving || !externalFolder} onPress={retryBackup}>Back up now</Button></View>
     </View>
     <Button mode="outlined" disabled={saving} onPress={exportData} style={styles.button}>Export my data</Button>
     <Button mode="outlined" disabled={saving} onPress={restoreData} style={styles.button}>Restore or import backup</Button>
-    <Button mode="contained" onPress={() => signOut().catch((e) => Alert.alert('Error', e.message))} style={styles.button}>Sign Out</Button>
-    <Button mode="text" textColor="#b3261e" disabled={saving} onPress={confirmDeleteAccount} style={styles.button}>Delete account and personal data</Button>
-    <Portal><Modal visible={deleteModalVisible} onDismiss={() => { setDeleteModalVisible(false); setDeletePassword(''); }} contentContainerStyle={styles.modal}>
+    {guestMode && <View style={styles.detailsSection}><Text style={styles.sectionTitle}>Using ExpenseTracker without an account</Text><Text style={styles.storageHint}>Your ledger stays on this device. Sign in or create an account only when you want account features such as company workspaces. If you sign in on this device, the guest ledger is copied into that account's local records. Exiting guest mode keeps the ledger on this device; choose Continue without an account to return to it.</Text><Button mode="contained" onPress={() => openAccountAccess().catch((error) => Alert.alert('Could not open account access', error.message))}>Sign in or create account</Button></View>}
+    <Button mode="contained" onPress={() => (guestMode ? exitGuestMode() : signOut()).catch((e) => Alert.alert('Error', e.message))} style={styles.button}>{guestMode ? 'Exit guest mode' : 'Sign Out'}</Button>
+    {user && <Button mode="text" textColor="#b3261e" disabled={saving} onPress={confirmDeleteAccount} style={styles.button}>Delete account and personal data</Button>}
+    {user && <Portal><Modal visible={deleteModalVisible} onDismiss={() => { setDeleteModalVisible(false); setDeletePassword(''); }} contentContainerStyle={styles.modal}>
       <Title>Confirm account deletion</Title>
       <Text style={styles.helper}>Enter your account password to permanently delete the account and personal cloud data.</Text>
       <TextInput label="Account password" value={deletePassword} onChangeText={setDeletePassword} secureTextEntry style={styles.input} />
@@ -208,13 +224,13 @@ export default function SettingsScreen() {
         finally { setSaving(false); setDeletePassword(''); }
       }}>Delete account and data</Button>
       <Button onPress={() => { setDeleteModalVisible(false); setDeletePassword(''); }}>Cancel</Button>
-    </Modal></Portal>
+    </Modal></Portal>}
     </ScrollView>
   </KeyboardAvoidingView></SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 }, safeArea:{flex:1,backgroundColor:'#2f7040'}, pageHeader:{paddingHorizontal:14,paddingTop:10,paddingBottom:10,backgroundColor:'#2f7040'}, container: { flexGrow: 1, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 24, alignItems: 'center', backgroundColor: '#f4f6f3' },
+  flex: { flex: 1 }, safeArea:{flex:1,backgroundColor:'#2f7040'}, pageHeader:{paddingHorizontal:14,paddingTop:10,paddingBottom:10,backgroundColor:'#2f7040'}, container: { ...contentWidthStyle, flexGrow: 1, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 24, alignItems: 'center', backgroundColor: '#f4f6f3' },
   title: { width: '100%', textAlign: 'left', backgroundColor: 'transparent', margin:0, elevation: 0, color: '#ffffff', fontSize: 22 },
   avatarButton:{alignSelf:'center'}, profileImage: { width: 82, height: 82, borderRadius: 41 },
   placeholder: { backgroundColor: '#e6ece7', justifyContent: 'center', alignItems: 'center', borderWidth:1,borderColor:'#d5ded6' },

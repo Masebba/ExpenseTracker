@@ -4,7 +4,7 @@ import { View, StyleSheet, ScrollView, Platform, KeyboardAvoidingView } from 're
 import { Title, Text, Button } from 'react-native-paper';
 import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
-import { inPeriod } from '../utils/appUtils';
+import { formatMoney, inPeriod } from '../utils/appUtils';
 
 export default function MyAccountScreen() {
     const { transactions } = useContext(TransactionsContext);
@@ -14,12 +14,14 @@ export default function MyAccountScreen() {
     const { currency } = useContext(CurrencyContext); // Destructure 'currency'
 
     const filteredTransactions = filter === 'all' ? transactions : transactions.filter((transaction) => inPeriod(transaction.timestamp, filter));
+    const visibleTransactions = filteredTransactions.filter((t) => !t.currency || t.currency === currency?.code);
+    const excludedTransactions = filteredTransactions.length - visibleTransactions.length;
 
 
-    const incomeTotal = filteredTransactions
+    const incomeTotal = visibleTransactions
         .filter((t) => t.type === 'income')
         .reduce((sum, t) => sum + t.amount, 0);
-    const expenseTotal = filteredTransactions
+    const expenseTotal = visibleTransactions
         .filter((t) => t.type === 'expense')
         .reduce((sum, t) => sum + t.amount, 0);
 
@@ -30,7 +32,8 @@ export default function MyAccountScreen() {
     return (
         <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
             <Title style={styles.title}>Account summary</Title>
-            <Text style={styles.period}>Your cash flow · {filter === 'all' ? 'All time' : ({daily:'Today',weekly:'This week',monthly:'This month',yearly:'This year'}[filter])}</Text>
+            <Text style={styles.period}>Your cash flow · {filter === 'all' ? 'All time' : ({daily:'Today',weekly:'This week',monthly:'This month',yearly:'This year'}[filter])} · {currency?.code || 'UGX'}</Text>
+            {excludedTransactions > 0 && <Text style={styles.period}>Excludes {excludedTransactions} transaction{excludedTransactions === 1 ? '' : 's'} in another currency.</Text>}
 
             {/* Filter Buttons Container */}
             <View style={styles.filterContainer}>
@@ -56,15 +59,15 @@ export default function MyAccountScreen() {
             </View>
 
             <View style={styles.summaryCard}>
-                <Text style={styles.label}>Income</Text><Text style={[styles.summary, styles.income]}>{currency.symbol} {incomeTotal.toFixed(2)}</Text>
+                <Text style={styles.label}>Income</Text><Text style={[styles.summary, styles.income]}>{formatMoney(incomeTotal, currency)}</Text>
             </View>
             <View style={styles.summaryCard}>
-                <Text style={styles.label}>Expenses</Text><Text style={[styles.summary, styles.expense]}>{currency.symbol} {expenseTotal.toFixed(2)}</Text>
+                <Text style={styles.label}>Expenses</Text><Text style={[styles.summary, styles.expense]}>{formatMoney(expenseTotal, currency)}</Text>
             </View>
             <View style={styles.summaryCard}>
-                <Text style={styles.label}>Net total</Text><Text style={[styles.summary, totalStyle]}>{currency.symbol} {netTotal.toFixed(2)}</Text>
+                <Text style={styles.label}>Net total</Text><Text style={[styles.summary, totalStyle]}>{formatMoney(netTotal, currency)}</Text>
             </View>
-            <View style={styles.insight}><Text style={styles.insightTitle}>Cash flow</Text><Text style={styles.insightText}>{netTotal >= 0 ? 'Income is ahead of expenses' : 'Expenses are ahead of income'} by {currency.symbol} {Math.abs(netTotal).toFixed(2)} for this period.</Text></View>
+            <View style={styles.insight}><Text style={styles.insightTitle}>Cash flow</Text><Text style={styles.insightText}>{netTotal >= 0 ? 'Income is ahead of expenses' : 'Expenses are ahead of income'} by {formatMoney(Math.abs(netTotal), currency)} for this period.</Text></View>
         </ScrollView></KeyboardAvoidingView>
     );
 }

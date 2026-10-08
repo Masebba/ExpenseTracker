@@ -4,7 +4,7 @@ import { View, StyleSheet, FlatList, Alert, TouchableOpacity } from 'react-nativ
 import { TextInput, Button, Title, Text, Modal, Portal, Card, IconButton } from 'react-native-paper';
 import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
-import { currencyFromCode } from '../utils/appUtils';
+import { currencyFromCode, formatMoney } from '../utils/appUtils';
 
 export default function IncomeScreen() {
     const {
@@ -225,7 +225,7 @@ export default function IncomeScreen() {
                         <Card.Content>
                             <View style={styles.transactionTop}><View style={styles.transactionCopy}><Text style={styles.amount}>
                                 {/* ${item.amount.toFixed(2)} */}
-                                {item.type === 'income' ? '+' : '-'}{currencyFromCode(item.currency, currency).symbol} {item.amount.toFixed(2)}
+                                {item.type === 'income' ? '+' : '-'}{formatMoney(item.amount, currencyFromCode(item.currency, currency))}
                             </Text>
                             <Text numberOfLines={1}>{item.description || 'Income'}</Text>
                             <Text style={styles.meta}>Category: {item.category} · {new Date(item.timestamp).toLocaleDateString()}</Text></View><View style={styles.inlineActions}>

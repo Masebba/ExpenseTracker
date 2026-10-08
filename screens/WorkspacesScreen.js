@@ -4,11 +4,13 @@ import { Button, Card, Dialog, Portal, RadioButton, Text, TextInput, Title } fro
 import { AuthContext } from '../AuthContext';
 import { AppFeaturesContext } from '../AppFeaturesContext';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { saveImageLocally } from '../utils/appUtils';
+import { saveImageLocally, contentWidthStyle, isUsableLocalImage } from '../utils/appUtils';
+import TermsOfServiceButton from '../components/TermsOfServiceButton';
 
 export default function WorkspacesScreen({ navigation }) {
-  const { user, memberships, invitations, invitationSyncError, acceptInvitation, activeWorkspace, setActiveWorkspace, createCompany, inviteMember, getMembers, changeMemberRole, removeMember, isDeveloper, developerAccessInfo, updateWorkspacePhoto, updateWorkspaceDetails } = useContext(AuthContext);
+  const { user, memberships, invitations, acceptInvitation, activeWorkspace, setActiveWorkspace, createCompany, inviteMember, getMembers, changeMemberRole, removeMember, isDeveloper, developerAccessInfo, updateWorkspacePhoto, updateWorkspaceDetails } = useContext(AuthContext);
   const { ads, addAd, removeAd } = useContext(AppFeaturesContext);
   const [name, setName] = useState('');
   const emptyDetails = { legalName:'', email:'', phone:'', alternatePhone:'', address:'', city:'', country:'', taxId:'', registrationNumber:'', website:'', contactName:'', contactTitle:'', paymentMethod:'', paymentDetails:'' };
@@ -25,6 +27,7 @@ export default function WorkspacesScreen({ navigation }) {
   const [members, setMembers] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [showCreateOrganization, setShowCreateOrganization] = useState(false);
   const current = memberships.find((item) => item.id === activeWorkspace?.id);
   useEffect(() => { setEditDetails({ ...emptyDetails, ...(current?.details || {}) }); }, [current?.id, current?.details]);
 
@@ -68,7 +71,7 @@ export default function WorkspacesScreen({ navigation }) {
   return <SafeAreaView edges={['top']} style={styles.safeArea}><KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
   <View style={styles.pageHeader}><Title style={styles.title}>Personal & organisations</Title></View>
   <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-    <Text style={styles.copy}>Your personal workspace stays private. Create or join as many organisations as you need, then switch workspace to see its separate transactions, inventory, sales, and orders.</Text>
+    <TermsOfServiceButton style={styles.termsButton} />
     {!!invitations?.length && <Card style={styles.card}>
       <Card.Title title="Organisation invitations" />
       <Card.Content>{invitations.map((invitation) => <View key={invitation.id} style={styles.member}>
@@ -76,16 +79,15 @@ export default function WorkspacesScreen({ navigation }) {
         <Button mode="contained" loading={busy} onPress={() => perform(() => acceptInvitation(invitation), 'Invitation accepted.')}>Accept</Button>
       </View>)}</Card.Content>
     </Card>}
-    {!!invitationSyncError && <Card style={styles.card}>
-      <Card.Content><Text style={styles.copy}>Invitations could not sync. Publish the updated firestore.rules file to the app’s Firebase project to enable secure invitation lookup.</Text></Card.Content>
-    </Card>}
     <Card style={styles.card}>
       <Card.Title title="Your workspaces" />
       <Card.Content>
         {[{ id: 'personal', name: 'Personal', type: 'personal', role: 'owner' }, ...memberships.filter((m) => m.status === 'active')].map((workspace) => (
-          <Button key={workspace.id} mode={activeWorkspace?.id === workspace.id ? 'contained' : 'outlined'} style={styles.workspaceButton} onPress={() => setActiveWorkspace(workspace)}>
-            {workspace.name} · {workspace.id === 'personal' ? 'Personal' : `${workspace.role} · ${workspace.type === 'company' ? 'Company' : 'Organisation'}`}
-          </Button>
+          <View key={workspace.id} style={styles.workspaceBlock}>
+            <Button mode={activeWorkspace?.id === workspace.id ? 'contained' : 'outlined'} style={styles.workspaceButton} onPress={() => setActiveWorkspace(workspace)}>
+              {workspace.name} · {workspace.id === 'personal' ? 'Personal' : `${workspace.role} · ${workspace.type === 'company' ? 'Company' : 'Organisation'}`}
+            </Button>
+          </View>
         ))}
         {!memberships.some((m) => m.status === 'active') && <Text style={styles.copy}>You haven’t joined an organisation yet.</Text>}
       </Card.Content>
@@ -99,20 +101,28 @@ export default function WorkspacesScreen({ navigation }) {
       <Card.Content><Text style={styles.copy}>The app could not read this account’s profile. Check the Firestore `users` document and deployed rules, then reopen Workspaces.</Text><Text selectable style={styles.diagnostic}>UID: {developerAccessInfo.uid}{'\n'}{developerAccessInfo.error}</Text></Card.Content>
     </Card>}
     <Card style={styles.card}>
-      <Card.Title title="Create an organisation" />
       <Card.Content>
+        <Button
+          mode="outlined"
+          icon={showCreateOrganization ? 'chevron-up' : 'plus'}
+          onPress={() => setShowCreateOrganization((visible) => !visible)}
+        >
+          {showCreateOrganization ? 'Close organisation form' : 'Create an organisation'}
+        </Button>
+        {showCreateOrganization && <>
         <TextInput label="Company or organisation name" value={name} onChangeText={setName} style={styles.input} />
         {Object.keys(emptyDetails).map((key)=><TextInput key={key} label={{legalName:'Registered legal name',email:'Business email',phone:'Business phone',alternatePhone:'Alternate business phone',address:'Business address',city:'City or town',country:'Country',taxId:'Tax identification number',registrationNumber:'Company / organisation registration number',website:'Website',contactName:'Invoice contact person',contactTitle:'Contact person role',paymentMethod:'Preferred payment method',paymentDetails:'Payment instructions or account details'}[key]} value={newDetails[key]} onChangeText={(value)=>setNewDetails((item)=>({...item,[key]:value}))} style={styles.input} />)}
         <RadioButton.Group value={type} onValueChange={setType}>
           <RadioButton.Item label="Company" value="company" />
           <RadioButton.Item label="Organisation" value="organization" />
         </RadioButton.Group>
-        <Button mode="contained" loading={busy} disabled={busy || !name.trim()} onPress={() => perform(async () => { await createCompany(name, type, newDetails); setName(''); setNewDetails(emptyDetails); }, 'Your new workspace is ready.')}>Create workspace</Button>
+        <Button mode="contained" loading={busy} disabled={busy || !name.trim()} onPress={() => perform(async () => { await createCompany(name, type, newDetails); setName(''); setNewDetails(emptyDetails); setShowCreateOrganization(false); }, 'Your new workspace is ready.')}>Create workspace</Button>
+        </>}
       </Card.Content>
     </Card>
     {current && <Card style={styles.card}>
       <Card.Title title="Organisation profile" subtitle={current.name} />
-      <Card.Content><Button icon="image-edit-outline" mode="outlined" disabled={current.role !== 'owner' || busy} onPress={chooseWorkspaceImage}>Change organisation image</Button>
+      <Card.Content>{current.photoURL && isUsableLocalImage(current.photoURL, FileSystem.documentDirectory) && <Card.Cover source={{ uri: current.photoURL }} style={{ marginBottom: 10, borderRadius: 12 }} />}<Button icon="image-edit-outline" mode="outlined" disabled={current.role !== 'owner' || busy} onPress={chooseWorkspaceImage}>Change organisation image</Button>
         <Text style={styles.section}>Invoice and organisation details</Text>
         {Object.keys(emptyDetails).map((key)=><TextInput key={key} label={{legalName:'Registered legal name',email:'Business email',phone:'Business phone',alternatePhone:'Alternate business phone',address:'Business address',city:'City or town',country:'Country',taxId:'Tax identification number',registrationNumber:'Company / organisation registration number',website:'Website',contactName:'Invoice contact person',contactTitle:'Contact person role',paymentMethod:'Preferred payment method',paymentDetails:'Payment instructions or account details'}[key]} value={editDetails[key]||''} onChangeText={(value)=>setEditDetails((item)=>({...item,[key]:value}))} style={styles.input} />)}
         <Button mode="contained" disabled={busy || current.role !== 'owner'} loading={busy} onPress={()=>perform(()=>updateWorkspaceDetails(current.id,editDetails),'Organisation details saved.')}>Save organisation details</Button>
@@ -155,4 +165,4 @@ export default function WorkspacesScreen({ navigation }) {
   </KeyboardAvoidingView></SafeAreaView>;
 }
 
-const styles = StyleSheet.create({ flex:{flex:1}, safeArea:{flex:1,backgroundColor:'#2f7040'}, pageHeader:{paddingHorizontal:18,paddingVertical:10,backgroundColor:'#2f7040'}, container: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24, backgroundColor: '#f4f6f3' }, title: { textAlign: 'left', fontSize: 22, color: '#ffffff', margin:0 }, copy: { color: '#647168', lineHeight: 21, marginBottom: 12 }, diagnostic: { color: '#59675d', fontSize: 12, lineHeight: 18 }, card: { marginBottom: 14, borderRadius: 16, backgroundColor: '#fff', elevation: 1 }, input: { backgroundColor: '#f7f9f6', marginVertical: 8 }, workspaceButton: { marginBottom: 8, borderRadius: 22 }, section: { fontSize: 16, fontWeight: 'bold', marginTop: 16, marginBottom: 8, color: '#2b4931' }, member: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#dde4dc' }, memberInfo: { flex: 1 }, footer: { color: '#777', textAlign: 'center', marginVertical: 12 } });
+const styles = StyleSheet.create({ flex:{flex:1}, safeArea:{flex:1,backgroundColor:'#f4f6f3'}, pageHeader:{paddingHorizontal:18,paddingVertical:10,backgroundColor:'#2f7040'}, container: { ...contentWidthStyle, flexGrow: 1, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24, backgroundColor: '#f4f6f3' }, title: { textAlign: 'left', fontSize: 22, color: '#ffffff', margin:0 }, copy: { color: '#647168', lineHeight: 21, marginBottom: 12 }, diagnostic: { color: '#59675d', fontSize: 12, lineHeight: 18 }, card: { marginBottom: 14, borderRadius: 16, backgroundColor: '#fff', elevation: 1 }, input: { backgroundColor: '#f7f9f6', marginVertical: 8 }, termsButton: { marginBottom: 14 }, workspaceButton: { marginBottom: 8, borderRadius: 22 }, workspaceBlock: { marginBottom: 4 }, section: { fontSize: 16, fontWeight: 'bold', marginTop: 16, marginBottom: 8, color: '#2b4931' }, member: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#dde4dc' }, memberInfo: { flex: 1 }, footer: { color: '#777', textAlign: 'center', marginVertical: 12 } });

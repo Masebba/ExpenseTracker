@@ -2,6 +2,17 @@
 
 ## Before the first production release
 
+## Completed hardening (code changes in this working copy)
+
+- [x] `screens/OfflineScreen.js` now renders the shared `RECORD_SYNC_STATUS` instead of claiming Firestore record sync.
+- [x] Local profile/workspace images fall back to placeholders when their stored `file://` URI no longer belongs to this install (`utils/appUtils.js:isUsableLocalImage`, used by Settings, Workspaces, and the header).
+- [x] Reports and account summary filter totals to the selected currency and report how many records were excluded.
+- [x] Invitation lookup normalizes email input before querying Firestore.
+- [x] Missing Firebase build config now shows a startup recovery screen instead of crashing (`index.js` error boundary).
+- [x] Added dependency-free `npm run check:self` (`scripts/self-check.js`) for money parsing, backup key scoping, and release-gate copy.
+
+## Remaining release blockers (not code-complete)
+
 - [ ] Replace all placeholders in `PRIVACY_POLICY.md`, publish it at a public URL, and add that URL to the Play listing.
 - [ ] Complete Google Play Data safety, content rating, target audience, app access, ads, and financial features declarations based on the actual production build and Firebase configuration.
 - [ ] Confirm Firebase production project, Authentication providers, Firestore and Storage rules, billing limits, backups, monitoring, and support ownership. Deploy rules from this repository only after reviewing them against production data.

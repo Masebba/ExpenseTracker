@@ -3,7 +3,7 @@ import { Alert, FlatList, StyleSheet, View } from 'react-native';
 import { Button, Card, Text, Title, TextInput } from 'react-native-paper';
 import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
-import { currencyFromCode, inPeriod } from '../utils/appUtils';
+import { currencyFromCode, formatMoney, inPeriod, contentWidthStyle } from '../utils/appUtils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const filters = ['daily', 'weekly', 'monthly', 'all'];
@@ -30,7 +30,7 @@ export default function TransactionsScreen() {
         <Text style={styles.description}>{item.description || item.category || (positive ? 'Income' : 'Expense')}</Text>
         <Text style={styles.meta}>{item.category || 'Uncategorized'} · {new Date(item.timestamp).toLocaleString()}</Text>
       </View>
-      <Text style={[styles.amount, { color: positive ? '#267a46' : '#bd4936' }]}>{positive ? '+' : '−'}{currencyFromCode(item.currency, currency).symbol} {Number(item.amount).toFixed(2)}</Text>
+      <Text style={[styles.amount, { color: positive ? '#267a46' : '#bd4936' }]}>{positive ? '+' : '−'}{formatMoney(item.amount, currencyFromCode(item.currency, currency))}</Text>
     </Card.Content></Card>;
   };
 
@@ -43,7 +43,7 @@ export default function TransactionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea:{flex:1,backgroundColor:'#2f7040'}, container: { flex: 1, paddingHorizontal: 18, paddingTop: 0, paddingBottom: 20, backgroundColor: '#f4f6f3' },
+  safeArea:{flex:1,backgroundColor:'#2f7040'}, container: { flex: 1, ...contentWidthStyle, paddingHorizontal: 18, paddingTop: 0, paddingBottom: 20, backgroundColor: '#f4f6f3' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal:-18, paddingHorizontal:18, paddingTop:10, paddingBottom:10, marginBottom:12, backgroundColor:'#2f7040' },
   title: { fontSize: 22, color: '#ffffff' }, filters: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#e9eee8', borderRadius: 16, padding: 4, marginBottom: 12 }, filterButton: { flex: 1, marginHorizontal: 1 },
   search: { marginBottom: 8, backgroundColor: '#fff' }, list: { paddingBottom: 16 }, card: { marginVertical: 5, borderRadius: 15, backgroundColor: '#fff', elevation: 1 }, item: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 12 },

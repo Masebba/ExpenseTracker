@@ -5,6 +5,7 @@ import { Card, Button, Text, TextInput, Title, Modal, Portal } from 'react-nativ
 import BarcodeScannerComponent from '../BarcodeScannerComponent';
 import { ProductsContext } from '../ProductsContext'; // Global context for products
 import { CurrencyContext } from '../CurrencyContext';
+import { formatMoney } from '../utils/appUtils';
 
 export default function ProductsScreen() {
     // If using a global context, get products and updater from it.
@@ -82,8 +83,8 @@ export default function ProductsScreen() {
                     <View style={styles.productDetails}>
                         <Text style={styles.productName}>{item.name}</Text>
                         <Text>Barcode: {item.barcode}</Text>
-                        <Text>Selling Price: {currency.symbol}{item.price.toFixed(2)}</Text>
-                        <Text>Buying Price: {currency.symbol}{item.buyingPrice.toFixed(2)}</Text>
+                        <Text>Selling Price: {formatMoney(item.price, currency)}</Text>
+                        <Text>Buying Price: {formatMoney(item.buyingPrice, currency)}</Text>
                         <Text>Stock: {item.stock}</Text>
                         <Text>Category: {item.category}</Text>
                     </View>
@@ -333,5 +334,4 @@ const styles = StyleSheet.create({
     categoryItem: { paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderColor: '#eee' },
     categoryItemText: { fontSize: 16 },
 });
-
 

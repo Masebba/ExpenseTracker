@@ -19,7 +19,10 @@ import { SalesProvider } from "./SalesContext";
 import { CurrencyProvider } from "./CurrencyContext";
 import { AppFeaturesProvider } from "./AppFeaturesContext";
 import { BusinessRecordsProvider } from "./BusinessRecordsContext";
-import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 import HomeScreen from "./screens/HomeScreen";
 import TransactionsScreen from "./screens/TransactionsScreen";
@@ -63,13 +66,21 @@ const combinedTheme = {
 };
 
 function AppTabs() {
+  const { guestMode } = useContext(AuthContext);
   const insets = useSafeAreaInsets();
   return (
     <BottomTab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarStyle: { height: 58 + insets.bottom, paddingBottom: Math.max(insets.bottom, 6), paddingTop: 6, backgroundColor: '#ffffff', elevation: 8, borderTopWidth: 0 },
-        tabBarLabelStyle: { fontSize: 10, marginTop: -2, fontWeight: '600' },
+        tabBarStyle: {
+          height: 58 + insets.bottom,
+          paddingBottom: Math.max(insets.bottom, 6),
+          paddingTop: 6,
+          backgroundColor: "#ffffff",
+          elevation: 8,
+          borderTopWidth: 0,
+        },
+        tabBarLabelStyle: { fontSize: 10, marginTop: -2, fontWeight: "600" },
         tabBarIcon: ({ color, size }) => {
           let iconName;
           if (route.name === "Home") {
@@ -92,43 +103,89 @@ function AppTabs() {
       <BottomTab.Screen name="Home" component={HomeScreen} />
       <BottomTab.Screen name="Transactions" component={TransactionsScreen} />
       <BottomTab.Screen name="Report" component={ReportsScreen} />
-      <BottomTab.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
-      <BottomTab.Screen name="Workspaces" component={WorkspacesScreen} options={{ headerShown: false, tabBarLabel: 'Workspaces', tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="domain" color={color} size={size} /> }} />
+      <BottomTab.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{ headerShown: false }}
+      />
+      {!guestMode && <BottomTab.Screen
+        name="Workspaces"
+        component={WorkspacesScreen}
+        options={{
+          headerShown: false,
+          tabBarLabel: "Workspaces",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="domain" color={color} size={size} />
+          ),
+        }}
+      />}
     </BottomTab.Navigator>
   );
 }
 
 function AppNavigator() {
-  const { user, isDeveloper } = useContext(AuthContext);
-  const linking = { prefixes: [], config: { screens: { Main: '', DeveloperStudio: 'internal/campaigns' } } };
+  const { user, guestMode, isDeveloper } = useContext(AuthContext);
+  const linking = {
+    prefixes: [],
+    config: { screens: { Main: "", DeveloperStudio: "internal/campaigns" } },
+  };
   return (
-    <NavigationContainer theme={combinedTheme} linking={user ? linking : undefined}>
-      {user ? <RootStack.Navigator screenOptions={{ headerShown: false }}>
-        <RootStack.Screen name="Main" component={AppTabs} />
-        {isDeveloper && <RootStack.Screen name="DeveloperStudio" component={DeveloperStudioScreen} options={{ headerShown: true, title: 'Developer Studio', headerStyle: { backgroundColor: '#2f7040' }, headerTintColor: '#ffffff', headerTitleStyle: { color: '#ffffff', fontWeight: '700' } }} />}
-      </RootStack.Navigator> : <AuthNavigator />}
+    <NavigationContainer
+      theme={combinedTheme}
+      linking={user ? linking : undefined}
+    >
+      {user || guestMode ? (
+        <RootStack.Navigator screenOptions={{ headerShown: false }}>
+          <RootStack.Screen name="Main" component={AppTabs} />
+          {isDeveloper && (
+            <RootStack.Screen
+              name="DeveloperStudio"
+              component={DeveloperStudioScreen}
+              options={{
+                headerShown: true,
+                title: "Developer Studio",
+                headerStyle: { backgroundColor: "#2f7040" },
+                headerTintColor: "#ffffff",
+                headerTitleStyle: { color: "#ffffff", fontWeight: "700" },
+              }}
+            />
+          )}
+        </RootStack.Navigator>
+      ) : (
+        <AuthNavigator />
+      )}
     </NavigationContainer>
+  );
+}
+
+function WorkspaceDataProviders({ children }) {
+  const { user, guestMode, storageRevision } = useContext(AuthContext);
+  const storageScope = user?.uid || (guestMode ? 'guest' : 'signed-out');
+  return (
+    <CurrencyProvider key={`${storageScope}:${storageRevision}`}>
+      <ProductsProvider>
+        <SalesProvider>
+          <OrdersProvider>
+            <TransactionsProvider>
+              <BusinessRecordsProvider>{children}</BusinessRecordsProvider>
+            </TransactionsProvider>
+          </OrdersProvider>
+        </SalesProvider>
+      </ProductsProvider>
+    </CurrencyProvider>
   );
 }
 
 export default function App() {
   return (
     <PaperProvider theme={customPaperTheme}>
-      <SafeAreaProvider><AuthProvider>
-        <AppFeaturesProvider>
-          <CurrencyProvider>
-            <ProductsProvider>
-              <SalesProvider>
-                <OrdersProvider>
-                  <TransactionsProvider>
-                    <BusinessRecordsProvider><AppNavigator /></BusinessRecordsProvider>
-                  </TransactionsProvider>
-                </OrdersProvider>
-              </SalesProvider>
-            </ProductsProvider>
-          </CurrencyProvider>
-        </AppFeaturesProvider>
-      </AuthProvider></SafeAreaProvider>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <AppFeaturesProvider>
+            <WorkspaceDataProviders><AppNavigator /></WorkspaceDataProviders>
+          </AppFeaturesProvider>
+        </AuthProvider>
+      </SafeAreaProvider>
     </PaperProvider>
   );
 }

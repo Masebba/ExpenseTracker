@@ -1,4 +1,4 @@
-import React, { createContext, useEffect, useState } from 'react';
+import React, { createContext, useEffect, useRef, useState } from 'react';
 import { createUserWithEmailAndPassword, EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, sendPasswordResetEmail, signInWithEmailAndPassword, signOut as firebaseSignOut, updateProfile } from 'firebase/auth';
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -7,12 +7,92 @@ import { acceptOrganizationInvitation, createOrganization, inviteOrganizationMem
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
+import { detectDeviceRegion } from './utils/appUtils';
 
 export const AuthContext = createContext();
+
+const GUEST_MODE_KEY = 'expenseTracker.guestMode';
+const GUEST_CLAIM_KEY = 'expenseTracker.guestClaimPending';
+const getCountryCode = () => detectDeviceRegion() || 'UG';
+
+async function moveGuestDataToAccount(uid) {
+  const keys = await AsyncStorage.getAllKeys();
+  const guestKeys = keys.filter((key) => key.startsWith('expenseTracker.guest.') || key === 'expenseTracker.currency.guest');
+  const guestBackupKeys = keys.filter((key) => key.startsWith('expenseTracker.externalBackup.guest.'));
+  const accountBackupDirectory = await AsyncStorage.getItem(`expenseTracker.externalBackup.${uid}.directory`);
+  const transferGuestBackup = !accountBackupDirectory && guestBackupKeys.length > 0;
+  if (!guestKeys.length && !transferGuestBackup) {
+    if (guestBackupKeys.length) await AsyncStorage.multiRemove(guestBackupKeys);
+    await AsyncStorage.setItem(GUEST_CLAIM_KEY, 'complete');
+    return;
+  }
+  const entries = await AsyncStorage.multiGet(guestKeys);
+  const writes = [];
+  for (const [guestKey, guestRaw] of entries) {
+    if (guestRaw == null) continue;
+    const accountKey = guestKey === 'expenseTracker.currency.guest'
+      ? `expenseTracker.currency.${uid}`
+      : guestKey.replace(/^expenseTracker\.guest\./, `expenseTracker.${uid}.`);
+    const accountRaw = await AsyncStorage.getItem(accountKey);
+    let merged = guestRaw;
+    if (accountRaw != null) {
+      try {
+        const accountValue = JSON.parse(accountRaw);
+        const guestValue = JSON.parse(guestRaw);
+        if (Array.isArray(accountValue) && Array.isArray(guestValue)) {
+          const ids = new Set(accountValue.map((item) => item?.id).filter(Boolean));
+          merged = JSON.stringify([...accountValue, ...guestValue.filter((item) => !item?.id || !ids.has(item.id))]);
+        } else {
+          merged = accountRaw;
+        }
+      } catch {
+        merged = accountRaw;
+      }
+    }
+    writes.push([accountKey, merged]);
+  }
+  if (transferGuestBackup) {
+    const backupEntries = await AsyncStorage.multiGet(guestBackupKeys);
+    for (const [key, value] of backupEntries) {
+      if (value != null) writes.push([key.replace('expenseTracker.externalBackup.guest.', `expenseTracker.externalBackup.${uid}.`), value]);
+    }
+  }
+  if (writes.length) await AsyncStorage.multiSet(writes);
+  const appDataDirectory = FileSystem.documentDirectory ? `${FileSystem.documentDirectory}ExpenseTracker/` : null;
+  if (appDataDirectory && writes.length) {
+    await FileSystem.makeDirectoryAsync(appDataDirectory, { intermediates: true }).catch(() => {});
+    const mirroredTargets = new Set();
+    for (const [key, value] of writes) {
+      if (!key.startsWith(`expenseTracker.${uid}.`) && key !== `expenseTracker.currency.${uid}`) continue;
+      const safeName = encodeURIComponent(key).replace(/%/g, '_');
+      try {
+        await FileSystem.writeAsStringAsync(`${appDataDirectory}${safeName}.json`, value);
+        mirroredTargets.add(key);
+      } catch { /* AsyncStorage remains the primary local copy. */ }
+    }
+    for (const guestKey of guestKeys) {
+      const accountKey = guestKey === 'expenseTracker.currency.guest'
+        ? `expenseTracker.currency.${uid}`
+        : guestKey.replace(/^expenseTracker\.guest\./, `expenseTracker.${uid}.`);
+      if (!mirroredTargets.has(accountKey)) continue;
+      const safeName = encodeURIComponent(guestKey).replace(/%/g, '_');
+      await FileSystem.deleteAsync(`${appDataDirectory}${safeName}.json`, { idempotent: true }).catch(() => {});
+    }
+  }
+  await AsyncStorage.multiRemove([...guestKeys, ...guestBackupKeys]);
+  await AsyncStorage.setItem(GUEST_CLAIM_KEY, 'complete');
+  if (transferGuestBackup) {
+    import('./services/externalBackup').then(({ scheduleExternalBackup }) => scheduleExternalBackup(uid)).catch(() => {});
+  }
+}
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [guestMode, setGuestMode] = useState(false);
+  const [guestTransferError, setGuestTransferError] = useState('');
+  const [storageRevision, setStorageRevision] = useState(0);
+  const authEvent = useRef(0);
   const [memberships, setMemberships] = useState([]);
   const [invitations, setInvitations] = useState([]);
   const [invitationSyncError, setInvitationSyncError] = useState(null);
@@ -22,9 +102,33 @@ export const AuthProvider = ({ children }) => {
   const [profileImage, setProfileImage] = useState(null);
   const [businessProfile, setBusinessProfile] = useState({});
   const [personalDetails, setPersonalDetails] = useState({});
+  const [countryCode, setCountryCode] = useState(getCountryCode);
 
   useEffect(() => onAuthStateChanged(auth, async (firebaseUser) => {
+    const event = ++authEvent.current;
+    setLoading(true);
+    if (firebaseUser) {
+      const claimPending = await AsyncStorage.getItem(GUEST_CLAIM_KEY).catch(() => null);
+      if (claimPending === 'pending') {
+        try {
+          await moveGuestDataToAccount(firebaseUser.uid);
+          await AsyncStorage.setItem(GUEST_MODE_KEY, 'false');
+          setGuestTransferError('');
+        } catch (error) {
+          setGuestTransferError(`Your guest records were kept on this device, but could not be copied into the account: ${error?.message || 'storage error'}`);
+          console.warn('Guest data transfer failed:', error?.message || error);
+          await firebaseSignOut(auth).catch(() => {});
+          if (event === authEvent.current) setLoading(false);
+          return;
+        }
+      }
+    }
+    if (event !== authEvent.current) return;
     setUser(firebaseUser || null);
+    setCountryCode(getCountryCode());
+    const savedGuestMode = !firebaseUser && (await AsyncStorage.getItem(GUEST_MODE_KEY).catch(() => null)) === 'true';
+    if (event !== authEvent.current) return;
+    setGuestMode(savedGuestMode);
     setMemberships([]);
     setIsDeveloper(false);
     setDeveloperAccessInfo(null);
@@ -39,13 +143,19 @@ export const AuthProvider = ({ children }) => {
       ]);
       setProfileImage(localImage || firebaseUser.photoURL || null);
     }
-    setLoading(false);
+    if (event === authEvent.current) setLoading(false);
   }), []);
 
   useEffect(() => {
     if (!user?.uid) return undefined;
     return onSnapshot(doc(firestore, 'users', user.uid), (profile) => {
       const developerAdmin = profile.exists() && profile.data()?.developerAdmin === true;
+      setCountryCode(
+        typeof profile.data()?.countryCode === 'string'
+          && profile.data().countryCode
+          ? profile.data().countryCode
+          : getCountryCode(),
+      );
       setBusinessProfile(profile.exists() ? (profile.data()?.businessProfile || {}) : {});
       setPersonalDetails(profile.exists() ? (profile.data()?.personalDetails || {}) : {});
       setIsDeveloper(developerAdmin);
@@ -117,6 +227,10 @@ export const AuthProvider = ({ children }) => {
         uid: firebaseUser.uid, email: firebaseUser.email || null,
         displayName: firebaseUser.displayName || '', photoURL: firebaseUser.photoURL || null,
         ...(profile.exists() ? profile.data() : {}), ...extra,
+        countryCode:
+          (profile.exists() && profile.data()?.countryCode) ||
+          extra.countryCode ||
+          getCountryCode(),
         updatedAt: new Date().toISOString(),
       }, { merge: true });
       if (profile.exists() && !profile.data()?.email && firebaseUser.email) {
@@ -127,25 +241,49 @@ export const AuthProvider = ({ children }) => {
 
   const signIn = (email, password) => signInWithEmailAndPassword(auth, email.trim(), password);
 
+  const startGuestMode = async () => {
+    await AsyncStorage.setItem(GUEST_MODE_KEY, 'true');
+    await AsyncStorage.removeItem(GUEST_CLAIM_KEY);
+    setGuestTransferError('');
+    setGuestMode(true);
+  };
+
+  const openAccountAccess = async () => {
+    setGuestTransferError('');
+    if (guestMode) await AsyncStorage.setItem(GUEST_CLAIM_KEY, 'pending');
+    await AsyncStorage.setItem(GUEST_MODE_KEY, 'false');
+    setGuestMode(false);
+  };
+
+  const exitGuestMode = async () => {
+    await AsyncStorage.setItem(GUEST_MODE_KEY, 'false');
+    await AsyncStorage.setItem(GUEST_CLAIM_KEY, 'pending');
+    setGuestMode(false);
+  };
+
+  const reloadLocalData = () => setStorageRevision((revision) => revision + 1);
+
   const signUp = async (email, password, displayName, phone = '') => {
     const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
     await updateProfile(credential.user, { displayName: displayName.trim(), photoURL: null });
-    await ensureProfile(credential.user, { phone: String(phone || '').trim(), email: credential.user.email?.trim().toLowerCase() || null, displayName: displayName.trim() });
+    await ensureProfile(credential.user, { phone: String(phone || '').trim(), email: credential.user.email?.trim().toLowerCase() || null, displayName: displayName.trim(), countryCode: getCountryCode() });
+    setCountryCode(getCountryCode());
     setUser(credential.user);
     return credential;
   };
 
-  const signOut = () => firebaseSignOut(auth);
+  const signOut = () => user?.uid ? firebaseSignOut(auth) : exitGuestMode();
   const resetPassword = (email) => sendPasswordResetEmail(auth, email.trim());
 
   const exportMyData = async () => {
-    if (!user?.uid) throw new Error('Sign in to export your data.');
-    const keys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(`expenseTracker.${user.uid}.`));
+    const ownerId = user?.uid || (guestMode ? 'guest' : null);
+    if (!ownerId) throw new Error('Open a local session to export your data.');
+    const keys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(`expenseTracker.${ownerId}.`));
     const localEntries = await AsyncStorage.multiGet(keys);
     const localData = Object.fromEntries(localEntries.map(([key, raw]) => {
       try { return [key, raw == null ? null : JSON.parse(raw)]; } catch { return [key, raw]; }
     }));
-    const currencyKey = `expenseTracker.currency.${user.uid}`;
+    const currencyKey = `expenseTracker.currency.${ownerId}`;
     const currencyRaw = await AsyncStorage.getItem(currencyKey);
     if (currencyRaw != null) {
       try { localData[currencyKey] = JSON.parse(currencyRaw); } catch { localData[currencyKey] = currencyRaw; }
@@ -154,16 +292,18 @@ export const AuthProvider = ({ children }) => {
     const organizationData = {};
     const cloudCollections = ['transactions', 'products', 'productCategories', 'sales', 'orders', 'customers', 'suppliers', 'invoices', 'purchases'];
     try {
+      if (ownerId === 'guest') throw new Error('No account cloud data in guest mode.');
       const profile = await getDoc(doc(firestore, 'users', user.uid));
       cloudData.profile = profile.exists() ? profile.data() : null;
     } catch { cloudData.profile = null; }
-    for (const name of cloudCollections) {
+    for (const name of ownerId === 'guest' ? [] : cloudCollections) {
       try {
         const records = await getDocs(collection(firestore, 'users', user.uid, name));
         cloudData[name] = records.docs.map((item) => ({ id: item.id, ...item.data() }));
       } catch { cloudData[name] = null; }
     }
     try {
+      if (ownerId === 'guest') throw new Error('No account memberships in guest mode.');
       const memberships = await getDocs(collection(firestore, 'users', user.uid, 'memberships'));
       cloudData.memberships = memberships.docs.map((item) => ({ id: item.id, ...item.data() }));
       for (const membership of memberships.docs.filter((item) => item.data().status === 'active')) {
@@ -176,7 +316,7 @@ export const AuthProvider = ({ children }) => {
         }
       }
     } catch { cloudData.memberships = null; }
-    return JSON.stringify({ format: 'ExpenseTracker export', version: 1, exportedAt: new Date().toISOString(), uid: user.uid, localData, cloudData, organizationData }, null, 2);
+    return JSON.stringify({ format: 'ExpenseTracker export', version: 1, exportedAt: new Date().toISOString(), uid: ownerId, localData, cloudData, organizationData }, null, 2);
   };
 
   const deleteMyAccount = async (password) => {
@@ -303,5 +443,5 @@ export const AuthProvider = ({ children }) => {
     setUser(Object.assign(Object.create(Object.getPrototypeOf(current)), current, updates));
   };
 
-  return <AuthContext.Provider value={{ user, memberships, invitations, invitationSyncError, acceptInvitation, activeWorkspace, setActiveWorkspace, isDeveloper, developerAccessInfo, refreshDeveloperAccess, profileImage, updateProfileImage, personalDetails, updatePersonalDetails, businessProfile, updatePersonalBusinessProfile, updateWorkspaceDetails, createCompany, inviteMember, getMembers, changeMemberRole, removeMember, updateWorkspacePhoto, signIn, signUp, signOut, resetPassword, exportMyData, deleteMyAccount, updateUserProfile, updateUserData }}>{!loading && children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, guestMode, guestTransferError, startGuestMode, openAccountAccess, exitGuestMode, storageRevision, reloadLocalData, memberships, invitations, invitationSyncError, acceptInvitation, activeWorkspace, setActiveWorkspace, isDeveloper, developerAccessInfo, refreshDeveloperAccess, profileImage, countryCode, updateProfileImage, personalDetails, updatePersonalDetails, businessProfile, updatePersonalBusinessProfile, updateWorkspaceDetails, createCompany, inviteMember, getMembers, changeMemberRole, removeMember, updateWorkspacePhoto, signIn, signUp, signOut, resetPassword, exportMyData, deleteMyAccount, updateUserProfile, updateUserData }}>{!loading && children}</AuthContext.Provider>;
 };

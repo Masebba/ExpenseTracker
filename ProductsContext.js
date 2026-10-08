@@ -20,6 +20,13 @@ export const ProductsProvider = ({ children }) => {
   const cloudLoaded = cloudLoadedFor === syncTag;
 
   useEffect(() => {
+    if (!categoriesHydrated) return;
+    setCategories((current) => ['General', ...new Set(
+      current.map((name) => String(name || '').trim()).filter((name) => name && name !== 'General'),
+    )]);
+  }, [categoriesHydrated, setCategories]);
+
+  useEffect(() => {
     if (!user?.uid) return undefined;
     if (!hydrated) return undefined;
     return subscribeToCollection(user.uid, 'products', (records) => {
@@ -39,7 +46,9 @@ export const ProductsProvider = ({ children }) => {
     if (!user?.uid) return undefined;
     if (!categoriesHydrated) return undefined;
     return subscribeToCollection(user.uid, 'productCategories', (records) => {
-      setCategories(records.map((r) => r.name));
+      setCategories(['General', ...new Set(
+        records.map((record) => String(record.name || '').trim()).filter((name) => name && name !== 'General'),
+      )]);
     }, (error) => console.warn('Category cloud listener failed:', error?.message || error), scopeId);
   }, [user?.uid, scopeId, cloudSyncRevision, categoriesHydrated, setCategories]);
 
@@ -91,14 +100,20 @@ export const ProductsProvider = ({ children }) => {
   const addCategory = useCallback((name) => {
     const clean = String(name || '').trim();
     if (!clean) return;
-    setCategories((current) => current.includes(clean) ? current : [...current, clean]);
+    setCategories((current) => current.includes(clean)
+      ? current
+      : ['General', ...new Set([...current, clean].filter((category) => category !== 'General'))]);
     if (user?.uid) writeRecord(user.uid, 'productCategories', { id: clean.toLowerCase().replace(/[^a-z0-9]+/g, '_'), name: clean }, scopeId).catch(() => {});
   }, [setCategories, user?.uid, scopeId]);
 
   const updateCategory = useCallback((oldName, newName) => {
     const clean = String(newName || '').trim();
     if (!clean) return;
-    setCategories((current) => current.map((c) => c === oldName ? clean : c));
+    setCategories((current) => ['General', ...new Set(
+      current.map((category) => category === oldName ? clean : category)
+        .map((category) => String(category || '').trim())
+        .filter((category) => category && category !== 'General'),
+    )]);
     setProducts((current) => current.map((p) => p.category === oldName ? { ...p, category: clean, updatedAt: nowIso() } : p));
     products.filter((p) => p.category === oldName).forEach((p) => save({ ...p, category: clean, updatedAt: nowIso() }));
   }, [products, save, setCategories, setProducts]);

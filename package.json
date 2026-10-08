@@ -12,6 +12,7 @@
     "ios:development-build": "npx eas-cli build --profile development --platform ios",
     "start:clear": "expo start --dev-client --clear",
     "check:expo": "npx expo config --type public",
+    "check:self": "node scripts/self-check.js",
     "build:android:production": "npx eas-cli build --profile production --platform android",
     "submit:android:internal": "npx eas-cli submit --profile production --platform android",
     "web": "expo start --web"
@@ -25,17 +26,19 @@
     "@react-navigation/native": "^7.0.18",
     "@react-navigation/stack": "^7.2.2",
     "@shopify/react-native-skia": "2.6.2",
-    "expo": "~57.0.24",
-    "expo-camera": "~57.0.5",
+    "expo": "~57.0.27",
+    "expo-camera": "~57.0.6",
     "expo-dev-client": "~57.0.19",
-    "expo-document-picker": "~57.0.2",
+    "expo-document-picker": "~57.0.3",
+    "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.4",
-    "expo-image-picker": "~57.0.19",
+    "expo-image-picker": "~57.0.20",
     "expo-print": "~57.0.2",
     "expo-secure-store": "~57.0.4",
     "expo-sharing": "~57.0.22",
     "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
+    "expo-updates": "~57.0.25",
     "firebase": "^12.0.0",
     "react": "19.2.3",
     "react-native": "^0.86.3",
@@ -54,7 +57,8 @@
     "victory-native": "^41.16.2"
   },
   "devDependencies": {
-    "@babel/core": "^7.20.0"
+    "@babel/core": "^7.20.0",
+    "babel-preset-expo": "~57.0.13"
   },
   "private": true,
   "expo": {

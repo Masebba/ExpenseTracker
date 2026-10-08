@@ -102,5 +102,18 @@ service cloud.firestore {
         && resource.data.createdBy == request.auth.uid
         && resource.data.publisherType == 'developer';
     }
+
+    match /appContent/termsOfService {
+      allow read: if true;
+      allow create, update: if isDeveloper()
+        && request.resource.data.keys().hasOnly(['body', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasAll(['body', 'updatedAt', 'updatedBy'])
+        && request.resource.data.body is string
+        && request.resource.data.body.size() > 0
+        && request.resource.data.body.size() <= 20000
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if false;
+    }
   }
 }

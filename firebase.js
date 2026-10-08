@@ -22,9 +22,10 @@ const missingKeys = Object.entries(firebaseConfig)
   .map(([key]) => key);
 
 if (missingKeys.length > 0) {
-  console.warn(
+  throw new Error(
     `[Firebase] Missing required config keys: ${missingKeys.join(", ")}. ` +
-      `Create a .env file with your Firebase credentials (see .env.example)`,
+      `The EXPO_PUBLIC_FIREBASE_* values were not embedded in this build. ` +
+      `Create a .env file with your Firebase credentials (see .env.example) and rebuild from the project directory so Expo CLI bakes them in.`,
   );
 }
 

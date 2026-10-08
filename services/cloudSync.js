@@ -7,7 +7,12 @@ const workspacePath = (workspaceId, name) => collection(firestore, 'organization
 const cloudEnabled = async (uid) => (await AsyncStorage.getItem(`expenseTracker.cloudSync.${uid}`)) === 'true';
 // Keep record cloud sync off in release builds until deletes, offline edits,
 // and concurrent-device conflicts have server-backed resolution semantics.
+// The switch below is the single release gate: setting it true makes every
+// record subscription and write in this module live again, so it must not be
+// flipped until offline edit queues, tombstone-based deletions, conflict
+// resolution, and two-device QA exist and are reviewed.
 export const CLOUD_SYNC_RELEASE_BLOCKED = true;
+export const CLOUD_SYNC_BLOCK_REASON = 'Cloud sync is paused until offline edits and deletions can be reconciled safely. Your data remains saved on this device.';
 
 const readLocalRecords = async (uid, name, workspaceId) => {
   const candidates = workspaceId === 'personal'

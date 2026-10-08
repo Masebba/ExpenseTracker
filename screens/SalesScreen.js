@@ -92,7 +92,7 @@ export default function SalesScreen() {
 
         try {
             const saleTransaction = await recordSale({ productId: scannedProduct.id, quantity: qty, discount: disc || 0, paymentOption });
-            Alert.alert('Sale Processed', `Sold ${qty} unit(s) for ${currency.symbol} ${saleTransaction.finalAmount.toFixed(2)} via ${paymentOption}`);
+            Alert.alert('Sale Processed', `Sold ${qty} unit(s) for ${formatMoney(saleTransaction.finalAmount, currency)} via ${paymentOption}`);
         } catch (error) {
             Alert.alert('Sale failed', error.message || 'Unable to process this sale.');
             return;
@@ -139,7 +139,7 @@ export default function SalesScreen() {
             <View style={styles.transactionItem}>
                 <View style={styles.transactionInfo}>
                     <Text style={styles.transactionText}>
-                        {item.productName} | Qty: {item.quantity} | {currency.symbol}{item.finalAmount.toFixed(2)}
+                        {item.productName} | Qty: {item.quantity} | {formatMoney(item.finalAmount, currency)}
                     </Text>
                     <Text style={styles.transactionDate}>
                         {new Date(item.timestamp).toLocaleString()}
@@ -225,7 +225,7 @@ export default function SalesScreen() {
                     keyboardType="numeric"
                     style={styles.input}
                 />
-                <Text style={styles.info}>Amount Due: {currency.symbol}{amountDue.toFixed(2)}</Text>
+                <Text style={styles.info}>Amount Due: {formatMoney(amountDue, currency)}</Text>
                 <Button mode="contained" onPress={handleSale} style={styles.button}>
                     Process Sale
                 </Button>
@@ -246,7 +246,7 @@ export default function SalesScreen() {
             </View>
             <View style={styles.summaryContainer}>
                 <Text style={styles.summaryText}>
-                    Total Sales ({filterPeriod}): {currency.symbol}{filteredTotalSales.toFixed(2)}
+                    Total Sales ({filterPeriod}): {formatMoney(filteredTotalSales, currency)}
                 </Text>
             </View>
 

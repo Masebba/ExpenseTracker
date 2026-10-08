@@ -1,6 +1,6 @@
 // screens/ReportsScreen.js
 import React, { useContext, useState, } from 'react';
-import { View, StyleSheet, ScrollView, Dimensions, FlatList, Platform, KeyboardAvoidingView } from 'react-native';
+import { View, StyleSheet, ScrollView, useWindowDimensions, FlatList, Platform, KeyboardAvoidingView } from 'react-native';
 import { Title, Text, Button, Card } from 'react-native-paper';
 import * as Print from 'expo-print';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -10,13 +10,12 @@ import { ProductsContext } from '../ProductsContext';
 import { OrdersContext } from '../OrdersContext';
 import { CurrencyContext } from '../CurrencyContext';
 import { TransactionsContext } from '../TransactionsContext';
-import { formatMoney, inPeriod, escapeHtml } from '../utils/appUtils';
+import { formatMoney, inPeriod, escapeHtml, CONTENT_MAX_WIDTH, contentWidthStyle } from '../utils/appUtils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const { width } = Dimensions.get('window');
-
 export default function ReportsScreen() {
-    // Retrieve data from contexts.
+    const { width: windowWidth } = useWindowDimensions();
+    const width = Math.min(windowWidth, CONTENT_MAX_WIDTH);
     const { sales } = useContext(SalesContext);
     const { products } = useContext(ProductsContext);
     const { orders } = useContext(OrdersContext);
@@ -31,6 +30,7 @@ export default function ReportsScreen() {
 
     const filteredSales = sales.filter((sale) => inPeriod(sale.timestamp, filterPeriod));
     const currencySales = filteredSales.filter((sale) => !sale.currency || sale.currency === currency?.code);
+    const excludedCurrencySales = filteredSales.length - currencySales.length;
     const filteredTotalSales = currencySales.reduce((sum, sale) => sum + Number(sale.finalAmount || 0), 0);
 
     const filteredBuyingCost = currencySales.reduce((sum, sale) => sum + ((sale.costAtSale ?? products.find(p => p.id === sale.productId)?.buyingPrice ?? 0) * sale.quantity), 0);
@@ -138,24 +138,25 @@ export default function ReportsScreen() {
 
             {/* Summary Cards */}
             <View style={styles.cardsContainer}>
-                <Card style={styles.summaryCard}>
+                <Card style={[styles.summaryCard, { width: (width - 40) / 2 }]}>
                     <Card.Title
                         title="Total Sales"
                         left={() => <MaterialCommunityIcons name="cash" size={24} color="#367f39" />}
                     />
                     <Card.Content>
-                        <Text style={styles.statText}>{currency.symbol} {filteredTotalSales.toFixed(2)}</Text>
-                        <Text style={styles.metricLabel}>({filterPeriod})</Text>
+                        <Text style={styles.statText}>{formatMoney(filteredTotalSales, currency)}</Text>
+                        <Text style={styles.metricLabel}>({filterPeriod} · {currency?.code || 'UGX'})</Text>
+                        {excludedCurrencySales > 0 && <Text style={styles.metricLabel}>Excludes {excludedCurrencySales} sale{excludedCurrencySales === 1 ? '' : 's'} in another currency.</Text>}
                     </Card.Content>
                 </Card>
-                <Card style={styles.summaryCard}>
+                <Card style={[styles.summaryCard, { width: (width - 40) / 2 }]}>
                     <Card.Title
                         title="Sales margin"
                         left={() => <MaterialCommunityIcons name="chart-line" size={24} color="#367f39" />}
                     />
                     <Card.Content>
                         <Text style={[styles.statText, { color: filteredProfit >= 0 ? 'green' : 'red' }]}>
-                            {currency.symbol} {filteredProfit.toFixed(2)}
+                            {formatMoney(filteredProfit, currency)}
                         </Text>
                         <Text style={styles.metricLabel}>({filterPeriod})</Text>
                     </Card.Content>
@@ -285,6 +286,7 @@ export default function ReportsScreen() {
 
 const styles = StyleSheet.create({
     container: {
+        ...contentWidthStyle,
         padding: 12,
         paddingBottom: 90,
         alignItems: 'stretch',
@@ -313,7 +315,6 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     summaryCard: {
-        width: (width - 40) / 2,
         backgroundColor: '#fff',
         borderRadius: 12,
         elevation: 1,

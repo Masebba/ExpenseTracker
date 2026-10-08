@@ -52,3 +52,65 @@ exports.deleteMyAccount = onCall({ timeoutSeconds: 540, memory: '512MiB' }, asyn
     throw new HttpsError('internal', 'Deletion is incomplete. Your account remains available for a safe retry. Contact support if another retry fails.');
   }
 });
+
+// Aggregate adoption counts for the developer account. Returns counts only:
+// no email addresses, no record contents, no per-user identifiers, and no
+// device or advertising identifiers. Firestore rules are not used here because
+// this function uses the Admin SDK, so the developerAdmin check below is the
+// only authorization gate and must stay in place.
+exports.getAdoptionCounts = onCall({ timeoutSeconds: 120, memory: '256MiB' }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in to view adoption counts.');
+  const profile = await db.collection('users').doc(uid).get();
+  if (!profile.exists || profile.get('developerAdmin') !== true) {
+    throw new HttpsError('permission-denied', 'Adoption reporting is restricted to the developer account.');
+  }
+  const since = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  // Firestore requires an index for createdAt range queries. If one is not
+  // deployed these degrade to null and are reported as unavailable rather
+  // than failing the whole report.
+  const registeredWithin = async (days) => {
+    try {
+      return (await db.collection('users').where('createdAt', '>=', since(days)).count().get()).data().count;
+    } catch {
+      return null;
+    }
+  };
+
+  const organizationsWithin = async (days) => {
+    try {
+      return (await db.collection('organizations').where('createdAt', '>=', since(days)).count().get()).data().count;
+    } catch {
+      return null;
+    }
+  };
+
+  try {
+    const [users, organizations, memberships, activeMemberships, advertisements, newUsers7, newUsers30, newOrganizations30] = await Promise.all([
+      db.collection('users').count().get(),
+      db.collection('organizations').count().get(),
+      db.collectionGroup('memberships').count().get(),
+      db.collectionGroup('memberships').where('status', '==', 'active').count().get(),
+      db.collection('advertisements').count().get(),
+      registeredWithin(7),
+      registeredWithin(30),
+      organizationsWithin(30),
+    ]);
+    return {
+      registeredAccounts: users.data().count,
+      organizationsCreated: organizations.data().count,
+      memberships: memberships.data().count,
+      activeMemberships: activeMemberships.data().count,
+      publishedAdverts: advertisements.data().count,
+      registeredAccountsLast7Days: newUsers7,
+      registeredAccountsLast30Days: newUsers30,
+      organizationsCreatedLast30Days: newOrganizations30,
+      newAccountTrendAvailable: newUsers30 !== null && newOrganizations30 !== null,
+      generatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    logger.error('Adoption counts failed', { uid, message: error.message });
+    throw new HttpsError('internal', 'Could not read adoption counts for this project.');
+  }
+});

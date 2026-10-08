@@ -57,9 +57,10 @@ export const inviteOrganizationMember = async (uid, organizationId, email, role 
 };
 
 export const listenToInvitations = (email, callback, onError) => {
-  if (!email) return () => {};
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) return () => {};
   const invitations = collectionGroup(firestore, 'invitations');
-  return onSnapshot(query(invitations, where('email', '==', email.trim().toLowerCase()), where('status', '==', 'pending')),
+  return onSnapshot(query(invitations, where('email', '==', normalizedEmail), where('status', '==', 'pending')),
     (snapshot) => callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })), snapshot.docs.map((item) => item.ref)), onError);
 };
 
