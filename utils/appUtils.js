@@ -151,6 +151,19 @@ export const detectDeviceRegion = () => {
 export const currencyForRegion = (region) =>
   currencyFromCode(REGION_CURRENCIES[String(region || '').toUpperCase()] || 'UGX');
 
+export const isValidHttpUrl = (value) => {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  try {
+    const url = new URL(value.trim());
+    return (url.protocol === 'https:' || url.protocol === 'http:')
+      && Boolean(url.hostname)
+      && !url.username
+      && !url.password;
+  } catch {
+    return false;
+  }
+};
+
 export const currencyFromCode = (code, fallback = { symbol: 'USh', code: 'UGX' }) => {
   const normalized = code || fallback.code;
   let symbol = CURRENCY_SYMBOLS[normalized] || normalized;

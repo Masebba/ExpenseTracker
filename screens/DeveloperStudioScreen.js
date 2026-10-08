@@ -1,12 +1,11 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { Alert, ImageBackground, ScrollView, StyleSheet, View, Platform, KeyboardAvoidingView, Modal, Pressable } from 'react-native';
+import { Alert, Image, ScrollView, StyleSheet, View, Platform, KeyboardAvoidingView, Modal, Pressable } from 'react-native';
 import { Button, Card, IconButton, Text, TextInput, Title } from 'react-native-paper';
-import * as ImagePicker from 'expo-image-picker';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app as firebaseApp } from '../firebase';
 import { AuthContext } from '../AuthContext';
 import { AppFeaturesContext } from '../AppFeaturesContext';
-import { contentWidthStyle } from '../utils/appUtils';
+import { contentWidthStyle, isValidHttpUrl } from '../utils/appUtils';
 import {
   DEFAULT_TERMS_OF_SERVICE,
   publishTermsOfService,
@@ -25,9 +24,9 @@ export default function DeveloperStudioScreen() {
   const [title, setTitle] = useState('');
   const [business, setBusiness] = useState('');
   const [description, setDescription] = useState('');
-  const [imageUri, setImageUri] = useState('');
   const [imageUrl, setImageUrl] = useState('');
-  const [imageMimeType, setImageMimeType] = useState('image/jpeg');
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [editing, setEditing] = useState(null);
   const [startsAt, setStartsAt] = useState('');
@@ -79,11 +78,21 @@ export default function DeveloperStudioScreen() {
     return () => { mounted = false; };
   }, [refreshDeveloperAccess]);
 
+  useEffect(() => {
+    setPreviewFailed(false);
+    setPreviewUrl('');
+    const cleanUrl = imageUrl.trim();
+    if (!isValidHttpUrl(cleanUrl)) return undefined;
+    const timer = setTimeout(() => setPreviewUrl(cleanUrl), 350);
+    return () => clearTimeout(timer);
+  }, [imageUrl]);
+
   const publish = async () => {
     if (startsAt && endsAt && startsAt > endsAt) { Alert.alert('Check advert dates', 'The stop date must be the same as or later than the start date.'); return; }
+    if (imageUrl.trim() && !isValidHttpUrl(imageUrl)) { Alert.alert('Invalid image URL', 'Enter a valid HTTP or HTTPS image URL.'); return; }
     setBusy(true);
     try {
-      const data = { title, businessName: business, description, imageUri, imageUrl, imageMimeType, linkUrl, startsAt, endsAt };
+      const data = { title, businessName: business, description, imageUrl: imageUrl.trim(), linkUrl, startsAt, endsAt };
       if (editing) await updateAd(editing, data); else await addAd(data);
       resetForm();
       Alert.alert(editing ? 'Advert updated' : 'Published', 'Your advert schedule has been saved.');
@@ -104,13 +113,7 @@ export default function DeveloperStudioScreen() {
     }
   };
 
-  const resetForm = () => { setTitle(''); setBusiness(''); setDescription(''); setImageUri(''); setImageUrl(''); setImageMimeType('image/jpeg'); setLinkUrl(''); setEditing(null); setStartsAt(''); setEndsAt(''); };
-  const pickImage = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) { Alert.alert('Photo access needed', 'Allow photo access to attach an advert image.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing:true, quality:0.75, maxWidth:1600, maxHeight:1600 });
-    if (!result.canceled && result.assets?.[0]) { setImageUri(result.assets[0].uri); setImageMimeType(result.assets[0].mimeType || 'image/jpeg'); setImageUrl(''); }
-  };
+  const resetForm = () => { setTitle(''); setBusiness(''); setDescription(''); setImageUrl(''); setPreviewUrl(''); setPreviewFailed(false); setLinkUrl(''); setEditing(null); setStartsAt(''); setEndsAt(''); };
   const openDatePicker = (field) => {
     const current = parseDate(field === 'start' ? startsAt : endsAt || startsAt);
     setCalendarMonth(new Date(current.getFullYear(), current.getMonth(), 1));
@@ -140,13 +143,17 @@ export default function DeveloperStudioScreen() {
       <TextInput label="Business name (optional)" value={business} onChangeText={setBusiness} style={styles.businessInput} />
       <TextInput label="Banner headline (optional)" value={title} onChangeText={setTitle} style={styles.input} />
       <TextInput label="Advert details" value={description} onChangeText={setDescription} multiline numberOfLines={5} textAlignVertical="top" style={styles.multiline} />
-      <Button mode="outlined" icon="image-plus" onPress={pickImage}>{imageUri || imageUrl ? 'Change attached image' : 'Upload image (optional)'}</Button>
-      {(imageUri || imageUrl) ? <Button compact onPress={()=>{setImageUri('');setImageUrl('');}}>Remove image</Button> : null}
+      <TextInput label="Advert Image URL (optional)" value={imageUrl} onChangeText={setImageUrl} placeholder="https://res.cloudinary.com/..." autoCapitalize="none" autoCorrect={false} keyboardType="url" style={styles.input} />
+      <Text style={styles.copy}>Paste a publicly accessible image URL. Recommended: JPG, PNG or WebP.</Text>
+      <View style={styles.preview}>
+        {previewUrl && previewUrl === imageUrl.trim() && !previewFailed
+          ? <Image key={previewUrl} source={{ uri: previewUrl }} style={styles.previewImage} resizeMode="cover" onError={() => setPreviewFailed(true)} />
+          : <Text style={styles.previewMessage}>{previewFailed ? 'Unable to load image. Check that the URL is publicly accessible.' : imageUrl.trim() && !isValidHttpUrl(imageUrl) ? 'Enter a valid HTTP or HTTPS image URL to preview.' : imageUrl.trim() ? 'Loading image preview…' : 'Image preview will appear here.'}</Text>}
+      </View>
       <TextInput label="Business link (optional)" value={linkUrl} onChangeText={setLinkUrl} autoCapitalize="none" style={styles.input} />
       <Text style={styles.dateLabel}>Schedule (optional)</Text>
       <View style={styles.dateRow}><View style={styles.dateField}><Text style={styles.dateCaption}>Starts</Text><Button compact mode="outlined" icon="calendar-month-outline" onPress={()=>openDatePicker('start')}>{startsAt || 'Choose date'}</Button></View>{!!startsAt && <IconButton icon="close-circle-outline" size={18} onPress={()=>{setStartsAt('');setEndsAt('');}}/>}</View>
       <View style={styles.dateRow}><View style={styles.dateField}><Text style={styles.dateCaption}>Ends</Text><Button compact mode="outlined" icon="calendar-month-outline" disabled={!startsAt} onPress={()=>openDatePicker('end')}>{endsAt || (startsAt?'Choose date':'Choose a start date first')}</Button></View>{!!endsAt && <IconButton icon="close-circle-outline" size={18} onPress={()=>setEndsAt('')}/>}</View>
-      {(!!business || !!title) && <ImageBackground source={(imageUri || imageUrl) ? { uri: imageUri || imageUrl } : undefined} style={styles.preview} imageStyle={styles.previewImage}><View style={styles.shade}><Text style={styles.previewBusiness}>{business || 'Business name'}</Text>{!!title && <Text style={styles.previewTitle}>{title}</Text>}<Text style={styles.copy}>{description}</Text></View></ImageBackground>}
       {!!editing && <Button compact onPress={resetForm}>Cancel editing</Button>}
       <Button mode="contained" loading={busy} disabled={busy || (!title.trim() && !business.trim())} onPress={publish}>{editing?'Save changes':'Publish advert'}</Button>
     </Card.Content></Card>
@@ -176,7 +183,7 @@ export default function DeveloperStudioScreen() {
       <Button mode="contained" loading={savingTerms} disabled={!termsLoaded || savingTerms || !termsBody.trim()} onPress={saveTerms}>Publish terms</Button>
     </Card.Content></Card>
     <Card style={styles.card}><Card.Title title="Published adverts" /><Card.Content>
-      {ads.filter((ad) => ad.createdBy === user?.uid).map((ad) => <View key={ad.id} style={styles.row}><View style={styles.info}><Text style={styles.adBusiness}>{ad.businessName || 'Advert'}</Text>{!!ad.title && <Text style={styles.adHeadline}>{ad.title}</Text>}<Text style={styles.copy}>{ad.description || 'No description'}{ad.startsAt?`\nStarts ${ad.startsAt}`:''}{ad.endsAt?` · Ends ${ad.endsAt}`:''}</Text></View><Button compact onPress={()=>{setEditing(ad.id);setTitle(ad.title||'');setBusiness(ad.businessName||'');setDescription(ad.description||'');setImageUri('');setImageUrl(ad.imageUrl||'');setLinkUrl(ad.linkUrl||'');setStartsAt(ad.startsAt||'');setEndsAt(ad.endsAt||'');}}>Edit</Button><Button compact textColor="#b3261e" onPress={() => removeAd(ad.id)}>Remove</Button></View>)}
+      {ads.filter((ad) => ad.createdBy === user?.uid).map((ad) => <View key={ad.id} style={styles.row}><View style={styles.info}><Text style={styles.adBusiness}>{ad.businessName || 'Advert'}</Text>{!!ad.title && <Text style={styles.adHeadline}>{ad.title}</Text>}<Text style={styles.copy}>{ad.description || 'No description'}{ad.startsAt?`\nStarts ${ad.startsAt}`:''}{ad.endsAt?` · Ends ${ad.endsAt}`:''}</Text></View><Button compact onPress={()=>{setEditing(ad.id);setTitle(ad.title||'');setBusiness(ad.businessName||'');setDescription(ad.description||'');setImageUrl(ad.imageUrl||'');setLinkUrl(ad.linkUrl||'');setStartsAt(ad.startsAt||'');setEndsAt(ad.endsAt||'');}}>Edit</Button><Button compact textColor="#b3261e" onPress={() => removeAd(ad.id)}>Remove</Button></View>)}
       {!ads.some((ad) => ad.createdBy === user?.uid) && <Text style={styles.copy}>No published adverts yet.</Text>}
     </Card.Content></Card>
   </ScrollView><Modal transparent animationType="fade" visible={!!datePicker} onRequestClose={()=>setDatePicker(null)}><View style={styles.modalBackdrop}><View style={styles.calendar}>
@@ -199,9 +206,9 @@ const styles = StyleSheet.create({
   dateRow: { flexDirection: 'row', alignItems: 'center', minHeight: 52 },
   dateField: { flex: 1 },
   dateCaption: { color: '#748078', fontSize: 12, marginLeft: 8 },
-  preview: { minHeight: 180, borderRadius: 14, overflow: 'hidden', backgroundColor: '#e8eee9', marginVertical: 10, justifyContent: 'flex-end' },
-  previewImage: { resizeMode: 'cover' },
-  shade: { backgroundColor: 'rgba(255,255,255,0.84)', padding: 14 },
+  preview: { width: '100%', height: 190, borderRadius: 14, overflow: 'hidden', backgroundColor: '#e8eee9', marginBottom: 12, alignItems: 'center', justifyContent: 'center' },
+  previewImage: { width: '100%', height: '100%' },
+  previewMessage: { color: '#647168', textAlign: 'center', paddingHorizontal: 18, lineHeight: 20 },
   previewBusiness: { color: '#26382b', fontSize: 23, fontWeight: '800' },
   previewTitle: { color: '#58655b', fontSize: 15, fontWeight: '600', marginTop: 3 },
   countGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10 },

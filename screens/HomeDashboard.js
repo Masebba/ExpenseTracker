@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import {
   Alert,
-  ImageBackground,
+  Image,
   Linking,
   ScrollView,
   StyleSheet,
@@ -16,7 +16,7 @@ import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityI
 import { TransactionsContext } from "../TransactionsContext";
 import { CurrencyContext } from "../CurrencyContext";
 import { AppFeaturesContext } from "../AppFeaturesContext";
-import { inPeriod, formatMoney, CONTENT_MAX_WIDTH, contentWidthStyle } from "../utils/appUtils";
+import { inPeriod, formatMoney, isValidHttpUrl, CONTENT_MAX_WIDTH, contentWidthStyle } from "../utils/appUtils";
 
 const shortcuts = [
   {
@@ -66,6 +66,7 @@ export default function HomeDashboard({ navigation }) {
   const { ads } = useContext(AppFeaturesContext);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [selectedAd, setSelectedAd] = useState(null);
+  const [failedAdImages, setFailedAdImages] = useState({});
   const carousel = useRef(null);
   const slideIndex = useRef(0);
   const contentWidth = Math.min(windowWidth, CONTENT_MAX_WIDTH);
@@ -195,7 +196,10 @@ export default function HomeDashboard({ navigation }) {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.carouselContent}
           >
-            {visibleAds.map((ad) => (
+            {visibleAds.map((ad) => {
+              const imageKey = `${ad.id}:${ad.imageUrl}`;
+              const hasImage = isValidHttpUrl(ad.imageUrl) && !failedAdImages[imageKey];
+              return (
               <TouchableOpacity
                 key={ad.id}
                 activeOpacity={0.94}
@@ -204,12 +208,14 @@ export default function HomeDashboard({ navigation }) {
                 accessibilityLabel={`Advertisement: ${ad.businessName || ad.title}`}
               >
                 <View style={styles.adLabel}><Text style={styles.adLabelText}>Ad</Text></View>
-                {ad.imageUrl ? (
-                  <ImageBackground
-                    source={{ uri: ad.imageUrl }}
-                    imageStyle={styles.bannerImage}
-                    style={styles.bannerImageBackground}
-                  >
+                {hasImage ? (
+                  <View style={styles.bannerImageBackground}>
+                    <Image
+                      source={{ uri: ad.imageUrl }}
+                      style={styles.bannerImage}
+                      resizeMode="cover"
+                      onError={() => setFailedAdImages((current) => ({ ...current, [imageKey]: true }))}
+                    />
                     <View style={styles.bannerShade}>
                       <Text numberOfLines={1} style={styles.businessName}>
                         {ad.businessName}
@@ -221,7 +227,7 @@ export default function HomeDashboard({ navigation }) {
                         {ad.description}
                       </Text>
                     </View>
-                  </ImageBackground>
+                  </View>
                 ) : (
                   <View style={styles.bannerFallback}>
                     <Text style={styles.businessName}>{ad.businessName}</Text>
@@ -232,7 +238,8 @@ export default function HomeDashboard({ navigation }) {
                   </View>
                 )}
               </TouchableOpacity>
-            ))}
+              );
+            })}
           </ScrollView>
         )}
 
@@ -242,12 +249,17 @@ export default function HomeDashboard({ navigation }) {
             onDismiss={() => setSelectedAd(null)}
             style={styles.detailDialog}
           >
-            {selectedAd?.imageUrl ? (
-              <ImageBackground
-                source={{ uri: selectedAd.imageUrl }}
-                style={styles.detailImage}
-                imageStyle={styles.detailImageRadius}
-              />
+            {selectedAd?.imageUrl && isValidHttpUrl(selectedAd.imageUrl) ? (
+              failedAdImages[`${selectedAd.id}:${selectedAd.imageUrl}`] ? (
+                <View style={styles.detailImageFallback}><Text style={styles.bannerDescription}>Advert image unavailable.</Text></View>
+              ) : (
+                <Image
+                  source={{ uri: selectedAd.imageUrl }}
+                  style={styles.detailImage}
+                  resizeMode="cover"
+                  onError={() => setFailedAdImages((current) => ({ ...current, [`${selectedAd.id}:${selectedAd.imageUrl}`]: true }))}
+                />
+              )
             ) : null}
             <Dialog.Content>
               <Text style={styles.adDialogLabel}>Advertisement</Text>
@@ -342,7 +354,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   bannerImageBackground: { flex: 1, justifyContent: "flex-end" },
-  bannerImage: { resizeMode: "cover" },
+  bannerImage: StyleSheet.absoluteFillObject,
   bannerShade: { padding: 16, backgroundColor: "rgba(255, 255, 255, 0.84)" },
   businessName: {
     color: "#26382b",
@@ -360,7 +372,7 @@ const styles = StyleSheet.create({
   bannerFallback: { flex: 1, justifyContent: "center", padding: 20, backgroundColor: "#e8eee9" },
   detailDialog: { borderRadius: 20, overflow: "hidden" },
   detailImage: { width: "100%", height: 190 },
-  detailImageRadius: { resizeMode: "cover" },
+  detailImageFallback: { width: "100%", height: 190, alignItems: "center", justifyContent: "center", backgroundColor: "#e8eee9" },
   adLabel: {
   position: "absolute",
   top: 10,
