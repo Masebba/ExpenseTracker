@@ -165,7 +165,7 @@ export const isValidHttpUrl = (value) => {
 };
 
 export const currencyFromCode = (code, fallback = { symbol: 'USh', code: 'UGX' }) => {
-  const normalized = code || fallback.code;
+  const normalized = String(code || fallback.code).toUpperCase();
   let symbol = CURRENCY_SYMBOLS[normalized] || normalized;
   try {
     symbol = new Intl.NumberFormat(undefined, {
@@ -178,6 +178,8 @@ export const currencyFromCode = (code, fallback = { symbol: 'USh', code: 'UGX' }
   }
   return { code: normalized, symbol, name: normalized };
 };
+
+export const CURRENCY_CODES = Object.keys(CURRENCY_SYMBOLS).sort();
 
 // Local images imported with the system picker are copied into private app
 // storage, but their absolute file:// URIs can become stale after a reinstall,
@@ -195,20 +197,21 @@ export const isUsableLocalImage = (uri, documentDirectory) => {
   return true;
 };
 
-export const formatMoney = (amount, currency = { symbol: 'Ush', code: 'UGX' }) => {
+export const formatCurrency = (amount, currencyCode = 'UGX', locale) => {
   const safeAmount = Number.isFinite(Number(amount)) ? Number(amount) : 0;
-  const symbol = currency?.symbol || currency?.code || 'UGX';
-  let digits = ['UGX', 'JPY', 'RWF', 'BIF', 'KRW', 'VND', 'XAF', 'XOF'].includes(currency?.code) ? 0 : 2;
   try {
-    digits = new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: currency?.code || 'UGX',
-    }).resolvedOptions().maximumFractionDigits;
+      currency: String(currencyCode || 'UGX').toUpperCase(),
+    }).format(safeAmount);
   } catch {
-    // Retain the known fraction digits when the runtime lacks this currency.
+    const code = String(currencyCode || 'UGX').toUpperCase();
+    return `${code} ${safeAmount.toLocaleString(locale)}`;
   }
-  return `${symbol} ${safeAmount.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 };
+
+export const formatMoney = (amount, currency = { code: 'UGX' }, locale) =>
+  formatCurrency(amount, typeof currency === 'string' ? currency : currency?.code, locale);
 
 export const periodStartEnd = (period, now = new Date()) => {
   const d = new Date(now);

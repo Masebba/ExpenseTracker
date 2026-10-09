@@ -1,10 +1,11 @@
 // screens/ExpenseScreen.js
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { View, StyleSheet, FlatList, Alert, TouchableOpacity } from 'react-native';
 import { TextInput, Button, Title, Text, Modal, Portal, Card, IconButton } from 'react-native-paper';
 import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
 import { currencyFromCode, formatMoney } from '../utils/appUtils';
+import CurrencyPicker from '../components/CurrencyPicker';
 
 export default function ExpenseScreen() {
     const {
@@ -24,12 +25,17 @@ export default function ExpenseScreen() {
     const [amount, setAmount] = useState('');
     const [description, setDescription] = useState('');
     const [selectedCategory, setSelectedCategory] = useState(categories.expense[0]);
+    const [transactionCurrencyCode, setTransactionCurrencyCode] = useState(currency?.code || 'UGX');
     const [newCategory, setNewCategory] = useState('');
     const [modalVisible, setModalVisible] = useState(false);
 
     // For editing an existing expense
     const [editingExpense, setEditingExpense] = useState(null);
     const [search, setSearch] = useState('');
+
+    useEffect(() => {
+        if (!editingExpense) setTransactionCurrencyCode(currency?.code || 'UGX');
+    }, [currency?.code, editingExpense]);
 
     const resetForm = () => {
         setAmount('');
@@ -46,9 +52,10 @@ export default function ExpenseScreen() {
                 amount,
                 description,
                 category: selectedCategory,
+                currencyCode: transactionCurrencyCode,
             });
         } else {
-            await addTransaction({ type: 'expense', amount, description, category: selectedCategory });
+            await addTransaction({ type: 'expense', amount, description, category: selectedCategory, currencyCode: transactionCurrencyCode });
         }
         resetForm();
         } catch (error) { Alert.alert('Could not save expense', error.message || 'Try again.'); }
@@ -59,6 +66,7 @@ export default function ExpenseScreen() {
         setAmount(expense.amount.toString());
         setDescription(expense.description);
         setSelectedCategory(expense.category);
+        setTransactionCurrencyCode(expense.currencyCode || expense.currency || currency?.code || 'UGX');
     };
 
     const handleDeleteExpense = (id) => {
@@ -111,6 +119,7 @@ export default function ExpenseScreen() {
                 keyboardType="decimal-pad"
                 style={styles.input}
             />
+            <CurrencyPicker value={transactionCurrencyCode} onChange={setTransactionCurrencyCode} label="Transaction currency" />
             <TextInput
                 label="Description"
                 value={description}
@@ -165,7 +174,7 @@ export default function ExpenseScreen() {
                         <Card.Content style={{paddingVertical:8}}>
                             <View style={{flexDirection:'row',alignItems:'center'}}><View style={{flex:1}}>
                             <Text style={styles.amount}> {/*- ${item.amount.toFixed(2)} */}
-                                {item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount, currencyFromCode(item.currency, currency))}
+                                {item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount, currencyFromCode(item.currencyCode || item.currency, currency))}
                             </Text>
                             <Text numberOfLines={1}>{item.description || 'Expense'}</Text>
                             <Text style={styles.timestamp}>{item.category} · {new Date(item.timestamp).toLocaleDateString()}</Text></View>

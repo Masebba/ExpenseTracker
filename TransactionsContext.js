@@ -5,6 +5,8 @@ import { STORAGE_KEYS, makeId, nowIso, toNumber } from './utils/appUtils';
 import usePersistedState from './utils/usePersistedState';
 import { deleteRecord, replaceCollection, subscribeToCollection, writeRecord } from './services/cloudSync';
 import { AppFeaturesContext } from './AppFeaturesContext';
+import { convertAmount } from './services/currencyConversion';
+import { currencyFromCode, formatMoney } from './utils/appUtils';
 
 export const TransactionsContext = createContext();
 const defaultCategories = { income: ['Salary', 'Bonus', 'Gift'], expense: ['Food', 'Transport', 'Bills'] };
@@ -40,14 +42,32 @@ export const TransactionsProvider = ({ children }) => {
     if (next) return Promise.all(next.map((record) => writeRecord(user.uid, 'transactions', record, scopeId)));
   }, [user?.uid, scopeId, cloudSyncRevision]);
 
-  const addTransaction = useCallback(async ({ type, amount, description = '', category = 'Uncategorized', id, currency: transactionCurrency }) => {
+  const addTransaction = useCallback(async ({ type, amount, description = '', category = 'Uncategorized', id, currency: legacyCurrency, currencyCode }) => {
     const value = toNumber(amount, NaN);
     if (!Number.isFinite(value) || value <= 0) throw new Error('Enter an amount greater than zero.');
     if (!['income', 'expense'].includes(type)) throw new Error('Invalid transaction type.');
-    const transaction = { id: id || makeId('txn'), type, amount: Math.round(value * 100) / 100, description: description.trim(), category: category || 'Uncategorized', currency: transactionCurrency || currency?.code || null, timestamp: nowIso(), updatedAt: nowIso() };
+    const transactionCurrencyCode = String(currencyCode || legacyCurrency || currency?.code || 'UGX').toUpperCase();
+    const converted = await convertAmount(value, transactionCurrencyCode, currency?.code || 'UGX');
+    const timestamp = nowIso();
+    const transaction = {
+      id: id || makeId('txn'),
+      type,
+      amount: Math.round(value * 100) / 100,
+      currencyCode: transactionCurrencyCode,
+      currencySymbol: currencyFromCode(transactionCurrencyCode).symbol,
+      currency: transactionCurrencyCode,
+      baseAmount: Math.round(converted.amount * 1000000) / 1000000,
+      baseCurrencyCode: currency?.code || 'UGX',
+      exchangeRate: converted.rate,
+      exchangeRateTimestamp: converted.timestamp,
+      description: description.trim(),
+      category: category || 'Uncategorized',
+      timestamp,
+      updatedAt: timestamp,
+    };
     await persist([transaction]);
     setTransactions((current) => [...current, transaction]);
-    addNotification(type === 'income' ? 'Income recorded' : 'Expense recorded', `${transaction.description || transaction.category}: ${transaction.currency || currency?.code || ''} ${transaction.amount.toFixed(2)}`);
+    addNotification(type === 'income' ? 'Income recorded' : 'Expense recorded', `${transaction.description || transaction.category}: ${formatMoney(transaction.amount, transaction.currencyCode)}`);
     return transaction;
   }, [persist, setTransactions, addNotification, currency?.code]);
 
@@ -56,10 +76,20 @@ export const TransactionsProvider = ({ children }) => {
     let updated;
     const current = transactions.find((item) => item.id === id);
     if (!current) return;
-    updated = { ...current, ...updatedData, amount: updatedData.amount === undefined ? current.amount : toNumber(updatedData.amount, current.amount), updatedAt: nowIso() };
+    const nextAmount = updatedData.amount === undefined ? current.amount : toNumber(updatedData.amount, current.amount);
+    const nextCurrencyCode = String(updatedData.currencyCode || updatedData.currency || current.currencyCode || current.currency || currency?.code || 'UGX').toUpperCase();
+    updated = { ...current, ...updatedData, amount: nextAmount, currencyCode: nextCurrencyCode, currency: nextCurrencyCode, updatedAt: nowIso() };
+    if (nextAmount !== current.amount || nextCurrencyCode !== (current.currencyCode || current.currency)) {
+      const converted = await convertAmount(nextAmount, nextCurrencyCode, currency?.code || 'UGX');
+      updated.currencySymbol = currencyFromCode(nextCurrencyCode).symbol;
+      updated.baseAmount = Math.round(converted.amount * 1000000) / 1000000;
+      updated.baseCurrencyCode = currency?.code || 'UGX';
+      updated.exchangeRate = converted.rate;
+      updated.exchangeRateTimestamp = converted.timestamp;
+    }
     await persist([updated]);
     setTransactions((items) => items.map((item) => item.id === id ? updated : item));
-  }, [persist, transactions, setTransactions]);
+  }, [persist, transactions, setTransactions, currency?.code]);
 
   const deleteTransaction = useCallback(async (id) => {
     await persist(null, id);

@@ -11,7 +11,9 @@ npx expo start
 
 The project uses Expo SDK 57. Firebase JS SDK 12+ is required. Deploy `firestore.rules` before relying on cloud sync, organisation memberships, developer adverts, or administrator-published Terms of Service. Deploy `storage.rules` for developer advert image uploads. Profile and organisation images stay on the device.
 
-The app chooses its ledger currency from the device's regional locale, falling back to its time-zone region when the locale has no country. Signup shows the detected region and stores it in the account profile; guest sessions use the current device settings. Currency and date/time display use the device locale without requesting precise location access. The converter lists the detected currency first and still allows selecting other currencies for conversion.
+The app chooses its initial base currency from the device's regional locale, falling back to its time-zone region when the locale has no country. Users can change the preferred base currency in Settings, and can select a separate currency for each income, expense, sale, order, invoice, or bill where appropriate. Monetary values use the shared `Intl.NumberFormat` currency formatter. Transactions retain their original amount and currency alongside the base-currency amount, rate, and quote timestamp captured when recorded; changing the preferred base currency does not rewrite those historical records. Reports convert the stored historical base amount into the selected reporting currency as needed.
+
+Exchange rates are provided by the open.er-api.com USD reference-rate endpoint. USD-based rates are cross-calculated for each currency pair and cached per base/target pair on-device for 12 hours; cached quotes up to 24 hours old may be used if the network is unavailable. If no recent quote exists, foreign-currency writes fail with an explicit conversion-unavailable message and keep the user's entered form values. Base-currency writes do not require network access.
 
 ## Data model
 

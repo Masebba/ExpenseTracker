@@ -4,12 +4,14 @@ import { makeId, nowIso, toInteger, toNumber } from './utils/appUtils';
 import usePersistedState from './utils/usePersistedState';
 import { deleteRecord, replaceCollection, subscribeToCollection, writeRecord } from './services/cloudSync';
 import { AppFeaturesContext } from './AppFeaturesContext';
+import { CurrencyContext } from './CurrencyContext';
 
 export const ProductsContext = createContext();
 
 export const ProductsProvider = ({ children }) => {
   const { user, activeWorkspace } = useContext(AuthContext);
   const { cloudSyncRevision, cloudSyncEnabled } = useContext(AppFeaturesContext);
+  const { currency, detectedCurrency } = useContext(CurrencyContext);
   const scopeId = activeWorkspace?.id || 'personal';
   const storageKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}products` : 'expenseTracker.guest.products';
   const categoriesKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}productCategories` : 'expenseTracker.guest.productCategories';
@@ -65,11 +67,11 @@ export const ProductsProvider = ({ children }) => {
     if (!Number.isFinite(price) || price <= 0) throw new Error('Selling price must be greater than zero.');
     if (!Number.isFinite(buyingPrice) || buyingPrice < 0) throw new Error('Buying price cannot be negative.');
     if (stock < 0) throw new Error('Stock cannot be negative.');
-    const product = { id: data.id || makeId('prod'), barcode: String(data.barcode || '').trim(), name: data.name.trim(), price: Math.round(price * 100) / 100, buyingPrice: Math.round(buyingPrice * 100) / 100, stock, category: String(data.category || 'General').trim() || 'General', createdAt: nowIso(), updatedAt: nowIso() };
+    const product = { id: data.id || makeId('prod'), barcode: String(data.barcode || '').trim(), name: data.name.trim(), price: Math.round(price * 100) / 100, buyingPrice: Math.round(buyingPrice * 100) / 100, stock, category: String(data.category || 'General').trim() || 'General', currencyCode: data.currencyCode || currency?.code || detectedCurrency?.code || 'UGX', createdAt: nowIso(), updatedAt: nowIso() };
     await save(product);
     setProducts((current) => [...current, product]);
     return product;
-  }, [save, setProducts]);
+  }, [save, setProducts, currency?.code, detectedCurrency?.code]);
 
   const updateProduct = useCallback(async (id, data) => {
     const current = products.find((item) => item.id === id);

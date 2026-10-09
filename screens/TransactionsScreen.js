@@ -30,7 +30,7 @@ export default function TransactionsScreen() {
         <Text style={styles.description}>{item.description || item.category || (positive ? 'Income' : 'Expense')}</Text>
         <Text style={styles.meta}>{item.category || 'Uncategorized'} · {new Date(item.timestamp).toLocaleString()}</Text>
       </View>
-      <Text style={[styles.amount, { color: positive ? '#267a46' : '#bd4936' }]}>{positive ? '+' : '−'}{formatMoney(item.amount, currencyFromCode(item.currency, currency))}</Text>
+      <Text style={[styles.amount, { color: positive ? '#267a46' : '#bd4936' }]}>{positive ? '+' : '−'}{formatMoney(item.amount, currencyFromCode(item.currencyCode || item.currency, currency))}</Text>
     </Card.Content></Card>;
   };
 

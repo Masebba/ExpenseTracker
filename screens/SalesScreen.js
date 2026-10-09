@@ -1,5 +1,5 @@
 // screens/SalesScreen.js
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { View, StyleSheet, Alert, FlatList } from 'react-native';
 import { Button, TextInput, Title, Text, Menu } from 'react-native-paper';
 import * as Print from 'expo-print';
@@ -7,7 +7,10 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ProductsContext } from '../ProductsContext';
 import { SalesContext } from '../SalesContext';
 import { CurrencyContext } from '../CurrencyContext';
-import { escapeHtml, formatMoney, inPeriod } from '../utils/appUtils';
+import { currencyFromCode, escapeHtml, formatMoney, inPeriod } from '../utils/appUtils';
+import { convertAmount } from '../services/currencyConversion';
+import useReportingAmounts from '../hooks/useReportingAmounts';
+import CurrencyPicker from '../components/CurrencyPicker';
 
 export default function SalesScreen() {
     // Retrieve products and sales from their respective contexts.
@@ -21,6 +24,8 @@ export default function SalesScreen() {
     const [discount, setDiscount] = useState('');
     const [paymentOption, setPaymentOption] = useState('Cash');
     const [amountDue, setAmountDue] = useState(0);
+    const [amountError, setAmountError] = useState('');
+    const [saleCurrencyCode, setSaleCurrencyCode] = useState(currency?.code || 'UGX');
     const [menuVisible, setMenuVisible] = useState(false);
     const [scannedProduct, setScannedProduct] = useState(null);
     const [scanning, setScanning] = useState(false);
@@ -31,30 +36,44 @@ export default function SalesScreen() {
     const [filterPeriod, setFilterPeriod] = useState('daily');
     const [saleSearch, setSaleSearch] = useState('');
 
+    useEffect(() => {
+        setSaleCurrencyCode(currency?.code || 'UGX');
+    }, [currency?.code]);
+
     // When the barcode changes, look up the product from inventory.
     useEffect(() => {
         const product = products.find(p => p.barcode === barcode);
         if (product) {
             setScannedProduct(product);
-            setAmountDue(product.price); // default amountDue for one unit.
+            setAmountDue(product.price);
         } else {
             setScannedProduct(null);
             setAmountDue(0);
         }
     }, [barcode, products]);
 
-    // Update final amount when discount, quantity, or scanned product changes.
+    // Preview the final amount in the selected transaction currency.
     useEffect(() => {
-        if (scannedProduct) {
-            let unitPrice = scannedProduct.price;
-            const disc = parseFloat(discount);
-            if (!isNaN(disc) && disc > 0) {
-                unitPrice = unitPrice - (unitPrice * disc) / 100;
-            }
-            const qty = parseInt(quantity) || 1;
-            setAmountDue(unitPrice * qty);
+        let active = true;
+        if (!scannedProduct) {
+            setAmountDue(0);
+            setAmountError('');
+            return undefined;
         }
-    }, [discount, quantity, scannedProduct]);
+        setAmountDue(null);
+        setAmountError('Updating exchange rate…');
+        const discountValue = discount === '' ? 0 : Number(discount);
+        const qty = parseInt(quantity, 10) || 1;
+        const sourceCode = scannedProduct.currencyCode || currency?.code || 'UGX';
+        convertAmount(scannedProduct.price * (1 - discountValue / 100) * qty, sourceCode, saleCurrencyCode)
+            .then(({ amount }) => {
+                if (active) { setAmountDue(amount); setAmountError(''); }
+            })
+            .catch((error) => {
+                if (active) { setAmountDue(null); setAmountError(error.message || 'Currency conversion is temporarily unavailable.'); }
+            });
+        return () => { active = false; };
+    }, [discount, quantity, scannedProduct, saleCurrencyCode, currency?.code]);
 
     const handleBarCodeScanned = ({ type, data }) => {
         setScanning(false);
@@ -91,8 +110,8 @@ export default function SalesScreen() {
         setAmountDue(finalAmount);
 
         try {
-            const saleTransaction = await recordSale({ productId: scannedProduct.id, quantity: qty, discount: disc || 0, paymentOption });
-            Alert.alert('Sale Processed', `Sold ${qty} unit(s) for ${formatMoney(saleTransaction.finalAmount, currency)} via ${paymentOption}`);
+            const saleTransaction = await recordSale({ productId: scannedProduct.id, quantity: qty, discount: disc || 0, paymentOption, currencyCode: saleCurrencyCode });
+            Alert.alert('Sale Processed', `Sold ${qty} unit(s) for ${formatMoney(saleTransaction.finalAmount, currencyFromCode(saleTransaction.currencyCode))} via ${paymentOption}`);
         } catch (error) {
             Alert.alert('Sale failed', error.message || 'Unable to process this sale.');
             return;
@@ -113,10 +132,10 @@ export default function SalesScreen() {
         <h1>Receipt</h1>
         <p><strong>Barcode:</strong> ${escapeHtml(products.find(p => p.id === sale.productId)?.barcode || 'N/A')}</p>
         <p><strong>Quantity:</strong> ${sale.quantity}</p>
-        <p><strong>Original Unit Price:</strong> ${formatMoney(sale.originalPrice, currency)}</p>
+        <p><strong>Original Unit Price:</strong> ${formatMoney(sale.originalPrice, currencyFromCode(sale.priceCurrencyCode || sale.currencyCode || currency?.code))}</p>
         <p><strong>Product:</strong> ${escapeHtml(sale.productName)}</p>
         <p><strong>Discount:</strong> ${sale.discount}%</p>
-        <p><strong>Total Amount:</strong> ${formatMoney(sale.finalAmount, currency)}</p>
+        <p><strong>Total Amount:</strong> ${formatMoney(sale.finalAmount, currencyFromCode(sale.currencyCode || sale.currency || currency?.code))}</p>
         <p><strong>Payment Option:</strong> ${sale.paymentOption}</p>
         <p><strong>Date:</strong> ${new Date(sale.timestamp).toLocaleString()}</p>
       </body>
@@ -129,9 +148,9 @@ export default function SalesScreen() {
         }
     };
 
-    const filteredSales = sales.filter((sale) => inPeriod(sale.timestamp, filterPeriod) && `${sale.productName || ''} ${sale.barcode || ''} ${sale.paymentMethod || ''}`.toLowerCase().includes(saleSearch.trim().toLowerCase()));
-
-    const filteredTotalSales = filteredSales.reduce((sum, t) => sum + t.finalAmount, 0);
+    const filteredSales = useMemo(() => sales.filter((sale) => inPeriod(sale.timestamp, filterPeriod) && `${sale.productName || ''} ${sale.barcode || ''} ${sale.paymentMethod || ''}`.toLowerCase().includes(saleSearch.trim().toLowerCase())), [sales, filterPeriod, saleSearch]);
+    const { amounts: reportingSalesAmounts, loading: salesConverting, error: salesConversionError } = useReportingAmounts(filteredSales, currency?.code, 'finalAmount');
+    const filteredTotalSales = filteredSales.reduce((sum, sale) => sum + (reportingSalesAmounts[sale.id] || 0), 0);
 
     // Render each sale transaction item.
     const renderTransactionItem = ({ item }) => {
@@ -139,7 +158,7 @@ export default function SalesScreen() {
             <View style={styles.transactionItem}>
                 <View style={styles.transactionInfo}>
                     <Text style={styles.transactionText}>
-                        {item.productName} | Qty: {item.quantity} | {formatMoney(item.finalAmount, currency)}
+                        {item.productName} | Qty: {item.quantity} | {formatMoney(item.finalAmount, currencyFromCode(item.currencyCode || item.currency || currency?.code))}
                     </Text>
                     <Text style={styles.transactionDate}>
                         {new Date(item.timestamp).toLocaleString()}
@@ -225,8 +244,9 @@ export default function SalesScreen() {
                     keyboardType="numeric"
                     style={styles.input}
                 />
-                <Text style={styles.info}>Amount Due: {formatMoney(amountDue, currency)}</Text>
-                <Button mode="contained" onPress={handleSale} style={styles.button}>
+                <CurrencyPicker value={saleCurrencyCode} onChange={setSaleCurrencyCode} label="Sale currency" />
+                <Text style={styles.info}>{amountError || `Amount Due: ${amountDue === null ? '' : formatMoney(amountDue, currencyFromCode(saleCurrencyCode))}`}</Text>
+                <Button mode="contained" disabled={amountDue === null} onPress={handleSale} style={styles.button}>
                     Process Sale
                 </Button>
             </View>
@@ -246,8 +266,10 @@ export default function SalesScreen() {
             </View>
             <View style={styles.summaryContainer}>
                 <Text style={styles.summaryText}>
-                    Total Sales ({filterPeriod}): {formatMoney(filteredTotalSales, currency)}
+                    Total Sales ({filterPeriod} · {currency?.code}): {salesConverting || salesConversionError ? '—' : formatMoney(filteredTotalSales, currency)}
                 </Text>
+                {salesConverting && <Text style={styles.transactionDate}>Converting sales…</Text>}
+                {!!salesConversionError && <Text style={styles.transactionDate}>{salesConversionError}</Text>}
             </View>
 
             {/* Sales Transactions List */}

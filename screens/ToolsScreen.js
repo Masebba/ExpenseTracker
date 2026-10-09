@@ -6,6 +6,8 @@ import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
 import { CURRENCY_SYMBOLS, currencyFromCode, formatMoney, inPeriod, toNumber } from '../utils/appUtils';
 import usePersistedState from '../utils/usePersistedState';
+import { getExchangeRate } from '../services/currencyConversion';
+import useReportingAmounts from '../hooks/useReportingAmounts';
 
 const currencies = Object.keys(CURRENCY_SYMBOLS);
 
@@ -28,7 +30,8 @@ export default function ToolsScreen({ route }) {
   const [savedTargets, setSavedTargets, budgetHydrated] = usePersistedState(budgetKey, { daily: 0, weekly: 0, monthly: 0 });
   const [budgetInput, setBudgetInput] = useState('');
   const [targetPeriod, setTargetPeriod] = useState('monthly');
-  const spent = useMemo(() => transactions.filter((item) => item.type === 'expense' && inPeriod(item.timestamp, targetPeriod)).reduce((sum, item) => sum + Number(item.amount || 0), 0), [transactions, targetPeriod]);
+  const { amounts: reportingAmounts, loading: reportingLoading, error: reportingError } = useReportingAmounts(transactions, currency?.code, 'amount');
+  const spent = useMemo(() => transactions.filter((item) => item.type === 'expense' && inPeriod(item.timestamp, targetPeriod)).reduce((sum, item) => sum + (reportingAmounts[item.id] || 0), 0), [transactions, targetPeriod, reportingAmounts]);
   const rate = toNumber(exchangeRate, 0);
   const converted = toNumber(amount, 0) * rate;
 
@@ -46,14 +49,11 @@ export default function ToolsScreen({ route }) {
     if (mode !== 'converter') return undefined;
     let active = true;
     setRateStatus('Updating exchange rate…');
-    fetch(`https://open.er-api.com/v6/latest/${from}`)
-      .then((response) => { if (!response.ok) throw new Error('Rate service unavailable.'); return response.json(); })
-      .then((data) => {
-        const latest = data?.rates?.[to];
-        if (!latest) throw new Error('Rate unavailable for this currency pair.');
-        if (active) { setExchangeRate(String(latest)); setRateStatus(`Rate updated ${data.time_last_update_utc ? new Date(data.time_last_update_utc).toLocaleDateString() : 'today'}`); }
+    getExchangeRate(from, to)
+      .then((latest) => {
+        if (active) { setExchangeRate(String(latest.rate)); setRateStatus(`Rate updated ${new Date(latest.timestamp).toLocaleDateString()}`); }
       })
-      .catch(() => { if (active) setRateStatus('Offline? Enter the exchange rate manually.'); });
+      .catch((error) => { if (active) setRateStatus(error.message || 'Exchange rate is temporarily unavailable.'); });
     return () => { active = false; };
   }, [from, to, mode]);
 
@@ -82,7 +82,7 @@ export default function ToolsScreen({ route }) {
         </View>
         <TextInput label={`1 ${from} = ? ${to}`} value={exchangeRate} onChangeText={setExchangeRate} keyboardType="decimal-pad" style={styles.input} />
         <Text style={styles.rateStatus}>{rateStatus}</Text>
-        <View style={styles.result}><Text style={styles.resultLabel}>Converted amount</Text><Text style={styles.resultAmount}>{currencyFromCode(to).symbol} {converted.toLocaleString(undefined, { maximumFractionDigits: 2 })}</Text></View>
+        <View style={styles.result}><Text style={styles.resultLabel}>Converted amount</Text><Text style={styles.resultAmount}>{formatMoney(converted, currencyFromCode(to))}</Text></View>
       </Card.Content>
     </Card>}
 
@@ -91,10 +91,11 @@ export default function ToolsScreen({ route }) {
         <View style={styles.targets}>{['daily','weekly','monthly'].map((period) => <Button key={period} compact mode={targetPeriod === period ? 'contained' : 'outlined'} onPress={() => setTargetPeriod(period)}>{period[0].toUpperCase()+period.slice(1)}</Button>)}</View>
         <TextInput label={`${targetPeriod[0].toUpperCase()+targetPeriod.slice(1)} target (${currency?.code || 'UGX'})`} value={budgetInput} onChangeText={setBudgetInput} keyboardType="decimal-pad" style={styles.input} />
         <Button mode="contained" compact onPress={saveBudget} style={styles.button}>Save target</Button>
-        <View style={styles.budgetRow}><Text>This {targetPeriod}</Text><Text style={styles.spent}>{formatMoney(spent, currency)}</Text></View>
+        <View style={styles.budgetRow}><Text>This {targetPeriod}</Text><Text style={styles.spent}>{reportingLoading || reportingError ? '—' : formatMoney(spent, currency)}</Text></View>
+        {!!reportingError && <Text style={styles.rateStatus}>{reportingError}</Text>}
         {savedBudget > 0 && <>
           <View style={styles.track}><View style={[styles.fill, { width: `${progress}%`, backgroundColor: progress >= 100 ? '#c34c3a' : '#3d8050' }]} /></View>
-          <View style={styles.budgetRow}><Text>Remaining</Text><Text style={styles.remaining}>{formatMoney(remaining, currency)}</Text></View>
+          <View style={styles.budgetRow}><Text>Remaining</Text><Text style={styles.remaining}>{reportingLoading || reportingError ? '—' : formatMoney(remaining, currency)}</Text></View>
         </>}
       </Card.Content>
     </Card>}

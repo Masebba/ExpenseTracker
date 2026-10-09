@@ -17,6 +17,7 @@ import { TransactionsContext } from "../TransactionsContext";
 import { CurrencyContext } from "../CurrencyContext";
 import { AppFeaturesContext } from "../AppFeaturesContext";
 import { inPeriod, formatMoney, isValidHttpUrl, CONTENT_MAX_WIDTH, contentWidthStyle } from "../utils/appUtils";
+import useReportingAmounts from "../hooks/useReportingAmounts";
 
 const shortcuts = [
   {
@@ -82,17 +83,14 @@ export default function HomeDashboard({ navigation }) {
   );
   const shortcutColumns = contentWidth >= 640 ? 5 : contentWidth >= 420 ? 4 : 3;
   const shortcutWidth = `${(100 / shortcutColumns).toFixed(4)}%`;
-  const today = transactions.filter(
-    (item) =>
-      inPeriod(item.timestamp, "daily") &&
-      (!item.currency || item.currency === currency?.code),
-  );
+  const { amounts: reportingAmounts, loading: reportingLoading, error: reportingError } = useReportingAmounts(transactions, currency?.code, "amount");
+  const today = transactions.filter((item) => inPeriod(item.timestamp, "daily"));
   const income = today
     .filter((item) => item.type === "income")
-    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    .reduce((sum, item) => sum + (reportingAmounts[item.id] || 0), 0);
   const expense = today
     .filter((item) => item.type === "expense")
-    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    .reduce((sum, item) => sum + (reportingAmounts[item.id] || 0), 0);
 
   useEffect(() => {
     slideIndex.current = 0;
@@ -136,23 +134,24 @@ export default function HomeDashboard({ navigation }) {
         <Card style={styles.summaryCard}>
           <Card.Content>
             <Text style={styles.summaryTitle}>Today · {currency?.code || "UGX"}</Text>
+            {!!reportingError && <Text style={styles.metricCaption}>{reportingError}</Text>}
             <View style={styles.metrics}>
               <View style={styles.metric}>
                 <Text style={styles.metricCaption}>Income</Text>
                 <Text numberOfLines={1} style={styles.income}>
-                  {formatMoney(income, currency)}
+                  {reportingLoading || reportingError ? '—' : formatMoney(income, currency)}
                 </Text>
               </View>
               <View style={styles.metric}>
                 <Text style={styles.metricCaption}>Expenses</Text>
                 <Text numberOfLines={1} style={styles.expense}>
-                  {formatMoney(expense, currency)}
+                  {reportingLoading || reportingError ? '—' : formatMoney(expense, currency)}
                 </Text>
               </View>
               <View style={styles.metric}>
                 <Text style={styles.metricCaption}>Net</Text>
                 <Text numberOfLines={1} style={styles.net}>
-                  {formatMoney(income - expense, currency)}
+                  {reportingLoading || reportingError ? '—' : formatMoney(income - expense, currency)}
                 </Text>
               </View>
             </View>

@@ -1,5 +1,5 @@
 // screens/ReportsScreen.js
-import React, { useContext, useState, } from 'react';
+import React, { useContext, useMemo, useState, } from 'react';
 import { View, StyleSheet, ScrollView, useWindowDimensions, FlatList, Platform, KeyboardAvoidingView } from 'react-native';
 import { Title, Text, Button, Card } from 'react-native-paper';
 import * as Print from 'expo-print';
@@ -12,6 +12,7 @@ import { CurrencyContext } from '../CurrencyContext';
 import { TransactionsContext } from '../TransactionsContext';
 import { formatMoney, inPeriod, escapeHtml, CONTENT_MAX_WIDTH, contentWidthStyle } from '../utils/appUtils';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import useReportingAmounts from '../hooks/useReportingAmounts';
 
 export default function ReportsScreen() {
     const { width: windowWidth } = useWindowDimensions();
@@ -20,7 +21,7 @@ export default function ReportsScreen() {
     const { products } = useContext(ProductsContext);
     const { orders } = useContext(OrdersContext);
 
-    const { currency } = useContext(CurrencyContext);
+    const { currency, detectedCurrency } = useContext(CurrencyContext);
     const { transactions } = useContext(TransactionsContext);
     // log the currency for debugging:
 
@@ -28,12 +29,22 @@ export default function ReportsScreen() {
     const filterOptions = ['daily', 'weekly', 'monthly', 'yearly'];
     const [filterPeriod, setFilterPeriod] = useState('daily');
 
-    const filteredSales = sales.filter((sale) => inPeriod(sale.timestamp, filterPeriod));
-    const currencySales = filteredSales.filter((sale) => !sale.currency || sale.currency === currency?.code);
-    const excludedCurrencySales = filteredSales.length - currencySales.length;
-    const filteredTotalSales = currencySales.reduce((sum, sale) => sum + Number(sale.finalAmount || 0), 0);
+    const filteredSales = useMemo(() => sales.filter((sale) => inPeriod(sale.timestamp, filterPeriod)), [sales, filterPeriod]);
+    const { amounts: salesInBase, loading: salesConverting, error: salesConversionError } = useReportingAmounts(filteredSales, currency?.code, 'finalAmount');
+    const currencySales = filteredSales;
+    const filteredTotalSales = currencySales.reduce((sum, sale) => sum + (salesInBase[sale.id] || 0), 0);
 
-    const filteredBuyingCost = currencySales.reduce((sum, sale) => sum + ((sale.costAtSale ?? products.find(p => p.id === sale.productId)?.buyingPrice ?? 0) * sale.quantity), 0);
+    const saleCostRecords = useMemo(() => filteredSales.map((sale) => ({
+        ...sale,
+        amount: sale.costAtSaleBaseAmount ?? (sale.costAtSale ?? products.find(p => p.id === sale.productId)?.buyingPrice ?? 0) * sale.quantity,
+        baseAmount: sale.costAtSaleBaseAmount,
+        baseCurrencyCode: sale.baseCurrencyCode,
+        currencyCode: sale.costCurrencyCode || sale.currencyCode || sale.currency || detectedCurrency?.code,
+    })), [filteredSales, products, detectedCurrency?.code]);
+    const { amounts: costsInBase, error: costConversionError } = useReportingAmounts(saleCostRecords, currency?.code, 'amount');
+    const costInBase = (sale) => costsInBase[sale.id] || 0;
+    const filteredBuyingCost = currencySales.reduce((sum, sale) => sum + costInBase(sale), 0);
+    const salesReportAvailable = !salesConverting && !salesConversionError && !costConversionError;
 
     // Profit/Loss: Total Sales minus Total Buying Cost.
     const filteredProfit = filteredTotalSales - filteredBuyingCost;
@@ -59,7 +70,7 @@ export default function ReportsScreen() {
     currencySales.forEach(sale => {
         const product = products.find(p => p.id === sale.productId);
         if (product) {
-            const profit = sale.finalAmount - (sale.costAtSale ?? product.buyingPrice) * sale.quantity;
+            const profit = (salesInBase[sale.id] || 0) - costInBase(sale);
             productProfitMap[product.id] = (productProfitMap[product.id] || 0) + profit;
         }
     });
@@ -92,8 +103,8 @@ export default function ReportsScreen() {
       </head>
       <body>
         <h2>Detailed Report (${filterPeriod})</h2>
-        <p><strong>Total Sales:</strong> ${formatMoney(filteredTotalSales, currency)}</p>
-        <p><strong>Total Profit/Loss:</strong> <span class="${filteredProfit >= 0 ? 'profit-positive' : 'profit-negative'}">${formatMoney(filteredProfit, currency)}</span></p>
+        <p><strong>Total Sales (${currency?.code}):</strong> ${formatMoney(filteredTotalSales, currency)}</p>
+        <p><strong>Total Profit/Loss (${currency?.code}):</strong> <span class="${filteredProfit >= 0 ? 'profit-positive' : 'profit-negative'}">${formatMoney(filteredProfit, currency)}</span></p>
         <h3>Sales History</h3>
         <ol>
           ${salesHistoryData.map(item => `<li>${escapeHtml(item.name)} - ${item.count} units sold</li>`).join('')}
@@ -144,9 +155,10 @@ export default function ReportsScreen() {
                         left={() => <MaterialCommunityIcons name="cash" size={24} color="#367f39" />}
                     />
                     <Card.Content>
-                        <Text style={styles.statText}>{formatMoney(filteredTotalSales, currency)}</Text>
+                        <Text style={styles.statText}>{salesReportAvailable ? formatMoney(filteredTotalSales, currency) : '—'}</Text>
                         <Text style={styles.metricLabel}>({filterPeriod} · {currency?.code || 'UGX'})</Text>
-                        {excludedCurrencySales > 0 && <Text style={styles.metricLabel}>Excludes {excludedCurrencySales} sale{excludedCurrencySales === 1 ? '' : 's'} in another currency.</Text>}
+                        {salesConverting && <Text style={styles.metricLabel}>Converting sales to {currency?.code}…</Text>}
+                        {!!(salesConversionError || costConversionError) && <Text style={styles.metricLabel}>{salesConversionError || costConversionError}</Text>}
                     </Card.Content>
                 </Card>
                 <Card style={[styles.summaryCard, { width: (width - 40) / 2 }]}>
@@ -156,7 +168,7 @@ export default function ReportsScreen() {
                     />
                     <Card.Content>
                         <Text style={[styles.statText, { color: filteredProfit >= 0 ? 'green' : 'red' }]}>
-                            {formatMoney(filteredProfit, currency)}
+                            {salesReportAvailable ? formatMoney(filteredProfit, currency) : '—'}
                         </Text>
                         <Text style={styles.metricLabel}>({filterPeriod})</Text>
                     </Card.Content>
@@ -224,7 +236,7 @@ export default function ReportsScreen() {
                     left={() => <MaterialCommunityIcons name="trophy" size={24} color="#367f39" />}
                 />
                 <Card.Content>
-                    {topProfitProducts.map(p => (
+                    {salesReportAvailable && topProfitProducts.map(p => (
                         <Text key={p.id} style={styles.itemText}>
                             {p.name} - Profit: {formatMoney(p.profit, currency)}
                         </Text>
@@ -268,7 +280,7 @@ export default function ReportsScreen() {
                                 <Card.Title title={`Order #${item.id}`} subtitle={item.customerName} />
                                 <Card.Content>
                                     <Text>Product: {item.productName}</Text>
-                                    <Text>Total: {formatMoney(item.total, currency)}</Text>
+                                    <Text>Total: {formatMoney(item.total, { code: item.currencyCode || detectedCurrency?.code || currency?.code })}</Text>
                                 </Card.Content>
                             </Card>
                         )}
@@ -277,7 +289,7 @@ export default function ReportsScreen() {
             </Card>
 
             {/* Detailed Report Button */}
-            <Button mode="outlined" style={styles.reportButton} onPress={handleDownloadReport}>
+            <Button mode="outlined" style={styles.reportButton} disabled={!salesReportAvailable} onPress={handleDownloadReport}>
                 Generate Detailed Report
             </Button>
         </ScrollView></KeyboardAvoidingView></SafeAreaView>

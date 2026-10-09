@@ -1,10 +1,11 @@
 // screens/IncomeScreen.js
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { View, StyleSheet, FlatList, Alert, TouchableOpacity } from 'react-native';
 import { TextInput, Button, Title, Text, Modal, Portal, Card, IconButton } from 'react-native-paper';
 import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
 import { currencyFromCode, formatMoney } from '../utils/appUtils';
+import CurrencyPicker from '../components/CurrencyPicker';
 
 export default function IncomeScreen() {
     const {
@@ -24,6 +25,7 @@ export default function IncomeScreen() {
     const [amount, setAmount] = useState('');
     const [description, setDescription] = useState('');
     const [selectedCategory, setSelectedCategory] = useState(categories.income[0]);
+    const [transactionCurrencyCode, setTransactionCurrencyCode] = useState(currency?.code || 'UGX');
     const [newCategory, setNewCategory] = useState('');
     const [modalVisible, setModalVisible] = useState(false);
 
@@ -32,13 +34,17 @@ export default function IncomeScreen() {
     const [editIncome, setEditIncome] = useState(null); // store the transaction being edited
     const [search, setSearch] = useState('');
 
+    useEffect(() => {
+        if (!editIncome) setTransactionCurrencyCode(currency?.code || 'UGX');
+    }, [currency?.code, editIncome]);
+
     // Handler to add new income
     const handleAddIncome = () => {
         if (!amount || !Number.isFinite(Number(amount)) || Number(amount) <= 0) {
             alert('Enter an amount greater than zero');
             return;
         }
-        addTransaction({ type: 'income', amount, description, category: selectedCategory }).then(() => { setAmount(''); setDescription(''); }).catch((error) => Alert.alert('Could not save income', error.message));
+        addTransaction({ type: 'income', amount, description, category: selectedCategory, currencyCode: transactionCurrencyCode }).then(() => { setAmount(''); setDescription(''); }).catch((error) => Alert.alert('Could not save income', error.message));
     };
 
     // Handler to update an existing income transaction
@@ -52,6 +58,7 @@ export default function IncomeScreen() {
             amount: editIncome.amount,
             description: editIncome.description,
             category: editIncome.category,
+            currencyCode: transactionCurrencyCode,
         }).then(() => { setEditModalVisible(false); setEditIncome(null); }).catch((error) => Alert.alert('Could not update income', error.message));
     };
 
@@ -110,6 +117,7 @@ export default function IncomeScreen() {
                 keyboardType="decimal-pad"
                 style={styles.input}
             />
+            <CurrencyPicker value={transactionCurrencyCode} onChange={setTransactionCurrencyCode} label="Transaction currency" />
             <TextInput
                 label="Description"
                 value={description}
@@ -187,6 +195,7 @@ export default function IncomeScreen() {
                         keyboardType="decimal-pad"
                         style={styles.input}
                     />
+                    <CurrencyPicker value={transactionCurrencyCode} onChange={setTransactionCurrencyCode} label="Transaction currency" />
                     <TextInput
                         label="Description"
                         value={editIncome ? editIncome.description : ''}
@@ -225,11 +234,11 @@ export default function IncomeScreen() {
                         <Card.Content>
                             <View style={styles.transactionTop}><View style={styles.transactionCopy}><Text style={styles.amount}>
                                 {/* ${item.amount.toFixed(2)} */}
-                                {item.type === 'income' ? '+' : '-'}{formatMoney(item.amount, currencyFromCode(item.currency, currency))}
+                                {item.type === 'income' ? '+' : '-'}{formatMoney(item.amount, currencyFromCode(item.currencyCode || item.currency, currency))}
                             </Text>
                             <Text numberOfLines={1}>{item.description || 'Income'}</Text>
                             <Text style={styles.meta}>Category: {item.category} · {new Date(item.timestamp).toLocaleDateString()}</Text></View><View style={styles.inlineActions}>
-                            <IconButton icon="pencil-outline" size={19} onPress={() => { setEditIncome(item); setEditModalVisible(true); }} /><IconButton icon="delete-outline" iconColor="#b3261e" size={19} onPress={() => handleDeleteIncome(item.id)} /></View></View>
+                            <IconButton icon="pencil-outline" size={19} onPress={() => { setEditIncome(item); setTransactionCurrencyCode(item.currencyCode || item.currency || currency?.code || 'UGX'); setEditModalVisible(true); }} /><IconButton icon="delete-outline" iconColor="#b3261e" size={19} onPress={() => handleDeleteIncome(item.id)} /></View></View>
                         </Card.Content>
                     </Card>
                 )}

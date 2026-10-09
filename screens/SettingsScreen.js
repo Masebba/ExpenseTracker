@@ -12,9 +12,12 @@ import { restoreBackup } from '../services/backupRestore';
 import TermsOfServiceButton from '../components/TermsOfServiceButton';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { CurrencyContext } from '../CurrencyContext';
+import CurrencyPicker from '../components/CurrencyPicker';
 
 export default function SettingsScreen({ navigation }) {
   const { user, guestMode, openAccountAccess, exitGuestMode, reloadLocalData, profileImage, updateProfileImage, signOut, updateUserProfile, updateUserData, personalDetails, updatePersonalDetails, businessProfile, updatePersonalBusinessProfile, activeWorkspace, exportMyData, deleteMyAccount } = useContext(AuthContext);
+  const { currency, detectedCurrency, setCurrencyCode } = useContext(CurrencyContext);
   const storageOwner = user?.uid || (guestMode ? 'guest' : null);
   const isPersonalWorkspace = activeWorkspace?.id === 'personal';
   const { cloudSyncEnabled, toggleCloudSync } = useContext(AppFeaturesContext);
@@ -200,7 +203,12 @@ export default function SettingsScreen({ navigation }) {
       </>}
     </View>}
     {user && !isPersonalWorkspace && <View style={styles.detailsSection}><Text style={styles.storageHint}>Company and organisation invoice details are managed with each workspace.</Text><Button compact mode="outlined" onPress={()=>navigation.navigate('Workspaces')}>Manage workspace details</Button></View>}
-    <Text style={styles.helper}>Currency and local date/time formatting follow your device’s region settings.</Text>
+    <View style={styles.detailsSection}>
+      <Text style={styles.sectionTitle}>Base currency</Text>
+      <Text style={styles.storageHint}>Automatically detected as {detectedCurrency.code}. Your preference ({currency.code}) is used for new transactions and reporting; existing transaction amounts are not changed.</Text>
+      <CurrencyPicker value={currency.code} onChange={setCurrencyCode} label="Reporting and default currency" />
+    </View>
+    <Text style={styles.helper}>Dates and times follow your device’s region settings.</Text>
     <TermsOfServiceButton style={styles.button} />
     <View style={styles.storageCard}>
       <Text style={styles.storageTitle}>Data storage</Text>

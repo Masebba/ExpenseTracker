@@ -3,10 +3,11 @@ import { View, StyleSheet, FlatList, Alert } from 'react-native';
 import { Title, Text, Card, Button, TextInput, Modal, Portal } from 'react-native-paper';
 import { CurrencyContext } from '../CurrencyContext';
 import { OrdersContext } from '../OrdersContext';
-import { formatMoney } from '../utils/appUtils';
+import { currencyFromCode, formatMoney } from '../utils/appUtils';
+import CurrencyPicker from '../components/CurrencyPicker';
 
 export default function OrdersScreen() {
-  const { currency } = useContext(CurrencyContext);
+  const { currency, detectedCurrency } = useContext(CurrencyContext);
   const { orders, addOrder, updateOrder, deleteOrder, addInstallment } = useContext(OrdersContext);
   const [orderModalVisible, setOrderModalVisible] = useState(false);
   const [installmentModalVisible, setInstallmentModalVisible] = useState(false);
@@ -15,16 +16,17 @@ export default function OrdersScreen() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [productName, setProductName] = useState('');
   const [total, setTotal] = useState('');
+  const [orderCurrencyCode, setOrderCurrencyCode] = useState(currency?.code || 'UGX');
   const [installmentAmount, setInstallmentAmount] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
 
-  const resetOrderForm = () => { setCustomerName(''); setCustomerPhone(''); setProductName(''); setTotal(''); setEditingOrder(null); };
+  const resetOrderForm = () => { setCustomerName(''); setCustomerPhone(''); setProductName(''); setTotal(''); setOrderCurrencyCode(currency?.code || 'UGX'); setEditingOrder(null); };
 
   const handleSaveOrder = async () => {
     try {
-      if (editingOrder) await updateOrder(editingOrder.id, { customerName: customerName.trim(), customerPhone: customerPhone.trim(), productName: productName.trim(), total: Number(total) });
-      else await addOrder({ customerName, customerPhone, productName, total });
+      if (editingOrder) await updateOrder(editingOrder.id, { customerName: customerName.trim(), customerPhone: customerPhone.trim(), productName: productName.trim(), total: Number(total), currencyCode: orderCurrencyCode });
+      else await addOrder({ customerName, customerPhone, productName, total, currencyCode: orderCurrencyCode });
       resetOrderForm(); setOrderModalVisible(false);
     } catch (error) { Alert.alert('Unable to save order', error.message); }
   };
@@ -46,13 +48,13 @@ export default function OrdersScreen() {
         <Text>Customer: {item.customerName}</Text>
         <Text>Phone: {item.customerPhone || 'Not provided'}</Text>
         <Text>Product: {item.productName}</Text>
-        <Text>Total: {formatMoney(item.total, currency)}</Text>
-        <Text>Paid: {formatMoney(paid, currency)}</Text>
-        <Text>Balance: {formatMoney(balance, currency)}</Text>
-        {!!item.installments?.length && <View style={styles.installmentsContainer}><Text>Installments:</Text>{item.installments.map((inst) => <Text key={inst.id || inst.date}>- {formatMoney(inst.amount, currency)} on {new Date(inst.date).toLocaleString()}</Text>)}</View>}
+        <Text>Total: {formatMoney(item.total, currencyFromCode(item.currencyCode || detectedCurrency?.code || currency?.code))}</Text>
+        <Text>Paid: {formatMoney(paid, currencyFromCode(item.currencyCode || detectedCurrency?.code || currency?.code))}</Text>
+        <Text>Balance: {formatMoney(balance, currencyFromCode(item.currencyCode || detectedCurrency?.code || currency?.code))}</Text>
+        {!!item.installments?.length && <View style={styles.installmentsContainer}><Text>Installments:</Text>{item.installments.map((inst) => <Text key={inst.id || inst.date}>- {formatMoney(inst.amount, currencyFromCode(inst.currencyCode || item.currencyCode || detectedCurrency?.code || currency?.code))} on {new Date(inst.date).toLocaleString()}</Text>)}</View>}
       </Card.Content>
       <Card.Actions>
-        <Button onPress={() => { setEditingOrder(item); setCustomerName(item.customerName); setCustomerPhone(item.customerPhone || ''); setProductName(item.productName); setTotal(String(item.total)); setOrderModalVisible(true); }}>Edit</Button>
+        <Button onPress={() => { setEditingOrder(item); setOrderCurrencyCode(item.currencyCode || currency?.code || 'UGX'); setCustomerName(item.customerName); setCustomerPhone(item.customerPhone || ''); setProductName(item.productName); setTotal(String(item.total)); setOrderModalVisible(true); }}>Edit</Button>
         <Button onPress={() => Alert.alert('Delete order', 'Are you sure you want to delete this order?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteOrder(item.id) }])}>Delete</Button>
         {balance > 0 && <Button onPress={() => { setEditingOrder(item); setInstallmentModalVisible(true); }}>Add Installment</Button>}
       </Card.Actions>
@@ -71,13 +73,14 @@ export default function OrdersScreen() {
         <TextInput label="Customer Name" value={customerName} onChangeText={setCustomerName} style={styles.input} />
         <TextInput label="Customer Phone" value={customerPhone} onChangeText={setCustomerPhone} keyboardType="phone-pad" style={styles.input} />
         <TextInput label="Product Name" value={productName} onChangeText={setProductName} style={styles.input} />
-        <TextInput label={`Total (${currency.code})`} value={total} onChangeText={setTotal} keyboardType="numeric" style={styles.input} />
+        <CurrencyPicker value={orderCurrencyCode} onChange={setOrderCurrencyCode} label="Order currency" />
+        <TextInput label={`Total (${orderCurrencyCode})`} value={total} onChangeText={setTotal} keyboardType="numeric" style={styles.input} />
         <Button mode="contained" onPress={handleSaveOrder} style={styles.button}>{editingOrder ? 'Update Order' : 'Add Order'}</Button>
         <Button onPress={() => { setOrderModalVisible(false); resetOrderForm(); }}>Cancel</Button>
       </Modal>
       <Modal visible={installmentModalVisible} onDismiss={() => { setInstallmentModalVisible(false); setInstallmentAmount(''); setEditingOrder(null); }} contentContainerStyle={styles.modal}>
         <Title>Add Installment</Title>
-        <TextInput label={`Installment Amount (${currency.code})`} value={installmentAmount} onChangeText={setInstallmentAmount} keyboardType="numeric" style={styles.input} />
+        <TextInput label={`Installment Amount (${editingOrder?.currencyCode || detectedCurrency?.code || currency.code})`} value={installmentAmount} onChangeText={setInstallmentAmount} keyboardType="numeric" style={styles.input} />
         <Button mode="contained" onPress={handleAddInstallment} style={styles.button}>Add Installment</Button>
         <Button onPress={() => { setInstallmentModalVisible(false); setInstallmentAmount(''); setEditingOrder(null); }}>Cancel</Button>
       </Modal>

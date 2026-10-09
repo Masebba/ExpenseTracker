@@ -12,7 +12,7 @@ export default function ProductsScreen() {
     // For a local version, you can continue using local state.
     const { products, setProducts, categories: categoriesList, addCategory, updateCategory, deleteCategory } = useContext(ProductsContext);
 
-    const { currency } = useContext(CurrencyContext); // Destructure 'currency'
+    const { currency, detectedCurrency } = useContext(CurrencyContext);
     // Local state for adding/editing product
     const [editingProduct, setEditingProduct] = useState(null);
     const [barcode, setBarcode] = useState('');
@@ -60,11 +60,11 @@ export default function ProductsScreen() {
         }
         try {
         if (editingProduct) {
-            await setProducts(products.map(prod => prod.id === editingProduct.id ? { ...prod, barcode: barcode.trim(), name: name.trim(), price: numericPrice, buyingPrice: numericBuyingPrice, stock: numericStock, category: category.trim(), updatedAt: new Date().toISOString() } : prod));
+            await setProducts(products.map(prod => prod.id === editingProduct.id ? { ...prod, barcode: barcode.trim(), name: name.trim(), price: numericPrice, buyingPrice: numericBuyingPrice, stock: numericStock, category: category.trim(), currencyCode: prod.currencyCode || detectedCurrency?.code || currency?.code || 'UGX', updatedAt: new Date().toISOString() } : prod));
         } else {
             const duplicateBarcode = barcode.trim() && products.some((prod) => prod.barcode === barcode.trim());
             if (duplicateBarcode) { Alert.alert('Duplicate barcode', 'A product with this barcode already exists.'); return; }
-            await setProducts([...products, { id: `prod_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, barcode: barcode.trim(), name: name.trim(), price: numericPrice, buyingPrice: numericBuyingPrice, stock: numericStock, category: category.trim(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]);
+            await setProducts([...products, { id: `prod_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, barcode: barcode.trim(), name: name.trim(), price: numericPrice, buyingPrice: numericBuyingPrice, stock: numericStock, category: category.trim(), currencyCode: currency?.code || 'UGX', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]);
         }
         resetForm();
         setProductModalVisible(false);
@@ -83,8 +83,8 @@ export default function ProductsScreen() {
                     <View style={styles.productDetails}>
                         <Text style={styles.productName}>{item.name}</Text>
                         <Text>Barcode: {item.barcode}</Text>
-                        <Text>Selling Price: {formatMoney(item.price, currency)}</Text>
-                        <Text>Buying Price: {formatMoney(item.buyingPrice, currency)}</Text>
+                        <Text>Selling Price: {formatMoney(item.price, { code: item.currencyCode || detectedCurrency?.code || currency?.code })}</Text>
+                        <Text>Buying Price: {formatMoney(item.buyingPrice, { code: item.currencyCode || detectedCurrency?.code || currency?.code })}</Text>
                         <Text>Stock: {item.stock}</Text>
                         <Text>Category: {item.category}</Text>
                     </View>
@@ -334,4 +334,3 @@ const styles = StyleSheet.create({
     categoryItem: { paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderColor: '#eee' },
     categoryItemText: { fontSize: 16 },
 });
-

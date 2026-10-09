@@ -6,13 +6,15 @@ import { deleteRecord, replaceCollection, subscribeToCollection, writeRecord } f
 import { makeId, nowIso, toNumber } from './utils/appUtils';
 import { ProductsContext } from './ProductsContext';
 import { AppFeaturesContext } from './AppFeaturesContext';
+import { convertAmount, getExchangeRate } from './services/currencyConversion';
+import { currencyFromCode } from './utils/appUtils';
 
 export const SalesContext = createContext();
 
 export const SalesProvider = ({ children }) => {
   const { user, activeWorkspace } = useContext(AuthContext);
   const { cloudSyncRevision, cloudSyncEnabled } = useContext(AppFeaturesContext);
-  const { currency } = useContext(CurrencyContext);
+  const { currency, detectedCurrency } = useContext(CurrencyContext);
   const { products, updateProduct } = useContext(ProductsContext);
   const scopeId = activeWorkspace?.id || 'personal';
   const storageKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}sales` : 'expenseTracker.guest.sales';
@@ -32,7 +34,7 @@ export const SalesProvider = ({ children }) => {
     replaceCollection(user.uid, 'sales', sales, scopeId).catch((error) => console.warn('Local sales backup failed:', error?.message || error));
   }, [user?.uid, scopeId, cloudSyncRevision, cloudSyncEnabled, hydrated, cloudLoaded, sales]);
 
-  const recordSale = useCallback(async ({ productId, quantity, discount = 0, paymentOption = 'Cash' }) => {
+  const recordSale = useCallback(async ({ productId, quantity, discount = 0, paymentOption = 'Cash', currencyCode }) => {
     const product = products.find((p) => p.id === productId);
     if (!product) throw new Error('Product could not be found.');
     const qty = Math.trunc(toNumber(quantity, NaN));
@@ -40,9 +42,35 @@ export const SalesProvider = ({ children }) => {
     if (!Number.isInteger(qty) || qty < 1) throw new Error('Quantity must be a whole number greater than zero.');
     if (product.stock < qty) throw new Error(`Not enough stock. Available: ${product.stock}`);
     if (!Number.isFinite(disc) || disc < 0 || disc > 100) throw new Error('Discount must be between 0% and 100%.');
-    const unitPrice = product.price * (1 - disc / 100);
+    const priceCurrencyCode = product.currencyCode || detectedCurrency?.code || currency?.code || 'UGX';
+    const saleCurrencyCode = String(currencyCode || priceCurrencyCode).toUpperCase();
+    const salePriceRate = await getExchangeRate(priceCurrencyCode, saleCurrencyCode);
+    const costBase = await convertAmount(product.buyingPrice, priceCurrencyCode, currency?.code || 'UGX');
+    const unitPrice = product.price * salePriceRate.rate * (1 - disc / 100);
     const finalAmount = Math.round(unitPrice * qty * 100) / 100;
-    const sale = { id: makeId('sale'), productId, productName: product.name, originalPrice: product.price, costAtSale: product.buyingPrice, finalAmount, discount: disc, quantity: qty, timestamp: nowIso(), paymentOption, currency: currency?.code || 'UGX' };
+    const converted = await convertAmount(finalAmount, saleCurrencyCode, currency?.code || 'UGX');
+    const sale = {
+      id: makeId('sale'),
+      productId,
+      productName: product.name,
+      originalPrice: product.price,
+      priceCurrencyCode,
+      costAtSale: product.buyingPrice,
+      costCurrencyCode: priceCurrencyCode,
+      costAtSaleBaseAmount: Math.round(costBase.amount * qty * 1000000) / 1000000,
+      finalAmount,
+      currencyCode: saleCurrencyCode,
+      currencySymbol: currencyFromCode(saleCurrencyCode).symbol,
+      currency: saleCurrencyCode,
+      baseAmount: Math.round(converted.amount * 1000000) / 1000000,
+      baseCurrencyCode: currency?.code || 'UGX',
+      exchangeRate: converted.rate,
+      exchangeRateTimestamp: converted.timestamp,
+      discount: disc,
+      quantity: qty,
+      timestamp: nowIso(),
+      paymentOption,
+    };
     // Persist the inventory decrement before recording the sale, so a stock
     // write failure never leaves a sale with unchanged inventory.
     await updateProduct(productId, { stock: product.stock - qty });
@@ -54,7 +82,7 @@ export const SalesProvider = ({ children }) => {
     }
     setSales((current) => [...current, sale]);
     return sale;
-  }, [currency?.code, products, setSales, updateProduct, user?.uid, scopeId]);
+  }, [currency?.code, detectedCurrency?.code, products, setSales, updateProduct, user?.uid, scopeId]);
 
   const deleteSale = useCallback(async (id) => {
     const sale = sales.find((item) => item.id === id);

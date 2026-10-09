@@ -1,10 +1,11 @@
 // screens/MyAccountScreen.js
-import React, { useContext, useState } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
 import { View, StyleSheet, ScrollView, Platform, KeyboardAvoidingView } from 'react-native';
 import { Title, Text, Button } from 'react-native-paper';
 import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
 import { formatMoney, inPeriod } from '../utils/appUtils';
+import useReportingAmounts from '../hooks/useReportingAmounts';
 
 export default function MyAccountScreen() {
     const { transactions } = useContext(TransactionsContext);
@@ -13,17 +14,15 @@ export default function MyAccountScreen() {
 
     const { currency } = useContext(CurrencyContext); // Destructure 'currency'
 
-    const filteredTransactions = filter === 'all' ? transactions : transactions.filter((transaction) => inPeriod(transaction.timestamp, filter));
-    const visibleTransactions = filteredTransactions.filter((t) => !t.currency || t.currency === currency?.code);
-    const excludedTransactions = filteredTransactions.length - visibleTransactions.length;
+    const filteredTransactions = useMemo(() => filter === 'all' ? transactions : transactions.filter((transaction) => inPeriod(transaction.timestamp, filter)), [transactions, filter]);
+    const { amounts: reportingAmounts, loading: reportingLoading, error: reportingError } = useReportingAmounts(filteredTransactions, currency?.code, 'amount');
 
-
-    const incomeTotal = visibleTransactions
+    const incomeTotal = filteredTransactions
         .filter((t) => t.type === 'income')
-        .reduce((sum, t) => sum + t.amount, 0);
-    const expenseTotal = visibleTransactions
+        .reduce((sum, t) => sum + (reportingAmounts[t.id] || 0), 0);
+    const expenseTotal = filteredTransactions
         .filter((t) => t.type === 'expense')
-        .reduce((sum, t) => sum + t.amount, 0);
+        .reduce((sum, t) => sum + (reportingAmounts[t.id] || 0), 0);
 
     // Calculate net total (income minus expense)
     const netTotal = incomeTotal - expenseTotal;
@@ -33,7 +32,7 @@ export default function MyAccountScreen() {
         <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
             <Title style={styles.title}>Account summary</Title>
             <Text style={styles.period}>Your cash flow · {filter === 'all' ? 'All time' : ({daily:'Today',weekly:'This week',monthly:'This month',yearly:'This year'}[filter])} · {currency?.code || 'UGX'}</Text>
-            {excludedTransactions > 0 && <Text style={styles.period}>Excludes {excludedTransactions} transaction{excludedTransactions === 1 ? '' : 's'} in another currency.</Text>}
+            {!!reportingError && <Text style={styles.period}>{reportingError}</Text>}
 
             {/* Filter Buttons Container */}
             <View style={styles.filterContainer}>
@@ -59,13 +58,13 @@ export default function MyAccountScreen() {
             </View>
 
             <View style={styles.summaryCard}>
-                <Text style={styles.label}>Income</Text><Text style={[styles.summary, styles.income]}>{formatMoney(incomeTotal, currency)}</Text>
+                <Text style={styles.label}>Income</Text><Text style={[styles.summary, styles.income]}>{reportingLoading || reportingError ? '—' : formatMoney(incomeTotal, currency)}</Text>
             </View>
             <View style={styles.summaryCard}>
-                <Text style={styles.label}>Expenses</Text><Text style={[styles.summary, styles.expense]}>{formatMoney(expenseTotal, currency)}</Text>
+                <Text style={styles.label}>Expenses</Text><Text style={[styles.summary, styles.expense]}>{reportingLoading || reportingError ? '—' : formatMoney(expenseTotal, currency)}</Text>
             </View>
             <View style={styles.summaryCard}>
-                <Text style={styles.label}>Net total</Text><Text style={[styles.summary, totalStyle]}>{formatMoney(netTotal, currency)}</Text>
+                <Text style={styles.label}>Net total</Text><Text style={[styles.summary, totalStyle]}>{reportingLoading || reportingError ? '—' : formatMoney(netTotal, currency)}</Text>
             </View>
             <View style={styles.insight}><Text style={styles.insightTitle}>Cash flow</Text><Text style={styles.insightText}>{netTotal >= 0 ? 'Income is ahead of expenses' : 'Expenses are ahead of income'} by {formatMoney(Math.abs(netTotal), currency)} for this period.</Text></View>
         </ScrollView></KeyboardAvoidingView>

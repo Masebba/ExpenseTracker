@@ -4,11 +4,15 @@ import { AppFeaturesContext } from './AppFeaturesContext';
 import { makeId, nowIso, toNumber } from './utils/appUtils';
 import usePersistedState from './utils/usePersistedState';
 import { deleteRecord, subscribeToCollection, writeRecord } from './services/cloudSync';
+import { CurrencyContext } from './CurrencyContext';
+import { convertAmount } from './services/currencyConversion';
+import { currencyFromCode } from './utils/appUtils';
 
 export const BusinessRecordsContext = createContext();
 
 export function BusinessRecordsProvider({ children }) {
   const { user, activeWorkspace } = useContext(AuthContext);
+  const { currency } = useContext(CurrencyContext);
   const { cloudSyncRevision } = useContext(AppFeaturesContext);
   const workspaceId = activeWorkspace?.id || 'personal';
   const scope = `${user?.uid || 'guest'}.${workspaceId}`;
@@ -83,37 +87,46 @@ export function BusinessRecordsProvider({ children }) {
     const discount = discountInput;
     const taxable = subtotal * (1 - discount / 100);
     const tax = taxable * taxInput / 100;
-    const invoice = { id: makeId('inv'), number: `INV-${year}-${String(sequence).padStart(4, '0')}`, customerId: data.customerId || '', customerName: String(data.customerName).trim(), customerEmail: data.customerEmail || '', customerPhone: data.customerPhone || '', customerAddress: data.customerAddress || '', customerTaxId: data.customerTaxId || '', issuer: data.issuer || {}, items: data.items.map((item) => ({ name: String(item.name).trim(), quantity: toNumber(item.quantity, 1), unitPrice: toNumber(item.unitPrice, 0) })), subtotal: Math.round(subtotal * 100) / 100, discountRate: discount, taxRate: taxInput, tax: Math.round(tax * 100) / 100, total: Math.round((taxable + tax) * 100) / 100, amountPaid: 0, payments: [], currency: data.currency || 'UGX', issueDate: nowIso(), dueDate: data.dueDate || '', notes: String(data.notes || ''), paymentLink: String(data.paymentLink || ''), paymentMethod: String(data.paymentMethod || ''), paymentDetails: String(data.paymentDetails || ''), status: 'unpaid', createdAt: nowIso() };
+    const invoiceCurrencyCode = data.currencyCode || data.currency || currency?.code || 'UGX';
+    const total = Math.round((taxable + tax) * 100) / 100;
+    const conversion = await convertAmount(total, invoiceCurrencyCode, currency?.code || 'UGX');
+    const invoice = { id: makeId('inv'), number: `INV-${year}-${String(sequence).padStart(4, '0')}`, customerId: data.customerId || '', customerName: String(data.customerName).trim(), customerEmail: data.customerEmail || '', customerPhone: data.customerPhone || '', customerAddress: data.customerAddress || '', customerTaxId: data.customerTaxId || '', issuer: data.issuer || {}, items: data.items.map((item) => ({ name: String(item.name).trim(), quantity: toNumber(item.quantity, 1), unitPrice: toNumber(item.unitPrice, 0) })), subtotal: Math.round(subtotal * 100) / 100, discountRate: discount, taxRate: taxInput, tax: Math.round(tax * 100) / 100, total, amountPaid: 0, payments: [], currency: invoiceCurrencyCode, currencyCode: invoiceCurrencyCode, currencySymbol: currencyFromCode(invoiceCurrencyCode).symbol, baseAmount: Math.round(conversion.amount * 1000000) / 1000000, baseCurrencyCode: currency?.code || 'UGX', exchangeRate: conversion.rate, exchangeRateTimestamp: conversion.timestamp, issueDate: nowIso(), dueDate: data.dueDate || '', notes: String(data.notes || ''), paymentLink: String(data.paymentLink || ''), paymentMethod: String(data.paymentMethod || ''), paymentDetails: String(data.paymentDetails || ''), status: 'unpaid', createdAt: nowIso() };
     const saved = await saveRecord('invoices', invoice); setInvoices((items) => [...items, saved]); return saved;
-  }, [invoices, saveRecord, setInvoices]);
+  }, [invoices, saveRecord, setInvoices, currency?.code]);
   const addInvoicePayment = useCallback(async (id, amount, method = 'Cash') => {
     const value = toNumber(amount, NaN);
     const invoice = invoices.find((item) => item.id === id);
     if (!invoice) throw new Error('Invoice not found.');
     if (!Number.isFinite(value) || value <= 0 || value > invoice.total - invoice.amountPaid + 0.001) throw new Error('Enter a payment up to the outstanding invoice balance.');
-    const payment = { id: makeId('payment'), amount: Math.round(value * 100) / 100, method, date: nowIso() };
+    const paymentCurrencyCode = invoice.currencyCode || invoice.currency || currency?.code || 'UGX';
+    const conversion = await convertAmount(value, paymentCurrencyCode, currency?.code || 'UGX');
+    const payment = { id: makeId('payment'), amount: Math.round(value * 100) / 100, currencyCode: paymentCurrencyCode, currencySymbol: currencyFromCode(paymentCurrencyCode).symbol, baseAmount: Math.round(conversion.amount * 1000000) / 1000000, baseCurrencyCode: currency?.code || 'UGX', exchangeRate: conversion.rate, exchangeRateTimestamp: conversion.timestamp, method, date: nowIso() };
     const amountPaid = Math.round((invoice.amountPaid + value) * 100) / 100;
     const status = amountPaid >= invoice.total ? 'paid' : 'partial';
     const updated = { ...invoice, amountPaid, payments: [...(invoice.payments || []), payment], status, updatedAt: nowIso() };
     const saved = await saveRecord('invoices', updated); setInvoices((items) => items.map((item) => item.id === id ? saved : item)); return saved;
-  }, [invoices, saveRecord, setInvoices]);
+  }, [invoices, saveRecord, setInvoices, currency?.code]);
   const addPurchase = useCallback(async (data) => {
     if (!data.supplierId || !String(data.description || '').trim()) throw new Error('Choose a supplier and describe the bill or purchase.');
     const amount = toNumber(data.amount, NaN);
     if (!Number.isFinite(amount) || amount <= 0) throw new Error('Purchase amount must be greater than zero.');
-    const record = { id: makeId('buy'), supplierId: data.supplierId, supplierName: data.supplierName, description: data.description.trim(), amount: Math.round(amount * 100) / 100, amountPaid: 0, payments: [], currency: data.currency || 'UGX', billNumber: String(data.billNumber || '').trim(), dueDate: data.dueDate || '', createdAt: nowIso(), status: 'unpaid' };
+    const purchaseCurrencyCode = data.currencyCode || data.currency || currency?.code || 'UGX';
+    const conversion = await convertAmount(amount, purchaseCurrencyCode, currency?.code || 'UGX');
+    const record = { id: makeId('buy'), supplierId: data.supplierId, supplierName: data.supplierName, description: data.description.trim(), amount: Math.round(amount * 100) / 100, amountPaid: 0, payments: [], currency: purchaseCurrencyCode, currencyCode: purchaseCurrencyCode, currencySymbol: currencyFromCode(purchaseCurrencyCode).symbol, baseAmount: Math.round(conversion.amount * 1000000) / 1000000, baseCurrencyCode: currency?.code || 'UGX', exchangeRate: conversion.rate, exchangeRateTimestamp: conversion.timestamp, billNumber: String(data.billNumber || '').trim(), dueDate: data.dueDate || '', createdAt: nowIso(), status: 'unpaid' };
     const saved = await saveRecord('purchases', record); setPurchases((items) => [...items, saved]); return saved;
-  }, [saveRecord, setPurchases]);
+  }, [saveRecord, setPurchases, currency?.code]);
   const addPurchasePayment = useCallback(async (id, amount, method = 'Cash') => {
     const value = toNumber(amount, NaN);
     const purchase = purchases.find((item) => item.id === id);
     if (!purchase) throw new Error('Supplier bill not found.');
     if (!Number.isFinite(value) || value <= 0 || value > purchase.amount - purchase.amountPaid + 0.001) throw new Error('Enter a payment up to the outstanding bill balance.');
-    const payment = { id: makeId('payment'), amount: Math.round(value * 100) / 100, method, date: nowIso() };
+    const paymentCurrencyCode = purchase.currencyCode || purchase.currency || currency?.code || 'UGX';
+    const conversion = await convertAmount(value, paymentCurrencyCode, currency?.code || 'UGX');
+    const payment = { id: makeId('payment'), amount: Math.round(value * 100) / 100, currencyCode: paymentCurrencyCode, currencySymbol: currencyFromCode(paymentCurrencyCode).symbol, baseAmount: Math.round(conversion.amount * 1000000) / 1000000, baseCurrencyCode: currency?.code || 'UGX', exchangeRate: conversion.rate, exchangeRateTimestamp: conversion.timestamp, method, date: nowIso() };
     const amountPaid = Math.round((purchase.amountPaid + value) * 100) / 100;
     const updated = { ...purchase, amountPaid, payments: [...(purchase.payments || []), payment], status: amountPaid >= purchase.amount ? 'paid' : 'partial', updatedAt: nowIso() };
     const saved = await saveRecord('purchases', updated); setPurchases((items) => items.map((item) => item.id === id ? saved : item)); return saved;
-  }, [purchases, saveRecord, setPurchases]);
+  }, [purchases, saveRecord, setPurchases, currency?.code]);
 
   const value = useMemo(() => ({ customers, suppliers, invoices, purchases, addCustomer, addSupplier, updateCustomer, updateSupplier, addInvoice, addInvoicePayment, addPurchase, addPurchasePayment, deleteBusinessRecord }), [customers, suppliers, invoices, purchases, addCustomer, addSupplier, updateCustomer, updateSupplier, addInvoice, addInvoicePayment, addPurchase, addPurchasePayment, deleteBusinessRecord]);
   return <BusinessRecordsContext.Provider value={value}>{children}</BusinessRecordsContext.Provider>;

@@ -7,6 +7,8 @@ import { ProductsContext } from '../ProductsContext';
 import { CurrencyContext } from '../CurrencyContext';
 import { AuthContext } from '../AuthContext';
 import { currencyFromCode, formatMoney, toNumber, contentWidthStyle } from '../utils/appUtils';
+import { convertAmount } from '../services/currencyConversion';
+import CurrencyPicker from '../components/CurrencyPicker';
 
 const fresh = { name: '', email: '', phone: '', address: '', taxId: '', creditLimit: '' };
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -21,6 +23,8 @@ export default function BusinessRecordsScreen({ route }) {
   const [customerForm, setCustomerForm] = useState(fresh);
   const [supplierForm, setSupplierForm] = useState(fresh);
   const [purchaseForm, setPurchaseForm] = useState({ supplierId: '', description: '', amount: '', billNumber: '', dueDate: '' });
+  const [purchaseCurrencyCode, setPurchaseCurrencyCode] = useState(currency?.code || 'UGX');
+  const [invoiceCurrencyCode, setInvoiceCurrencyCode] = useState(currency?.code || 'UGX');
   const [invoiceForm, setInvoiceForm] = useState({ customerId: '', customerName:'', customerEmail:'', customerPhone:'', customerAddress:'', customerTaxId:'', issuerName:'', issuerEmail:'', issuerPhone:'', issuerSecondaryPhone:'', issuerAddress:'', issuerCity:'', issuerCountry:'', issuerTaxId:'', issuerRegistrationNumber:'', issuerWebsite:'', issuerContactName:'', issuerContactTitle:'', name: '', quantity: '1', unitPrice: '', taxRate: '0', discount: '0', dueDate: '', paymentLink: '', paymentMethod: '', paymentDetails: '', notes: '' });
   const [issuerWorkspaceId, setIssuerWorkspaceId] = useState(activeWorkspace?.id || 'personal');
   const [lines, setLines] = useState([]);
@@ -32,7 +36,7 @@ export default function BusinessRecordsScreen({ route }) {
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
   const matchesSearch = (record, extra = '') => `${record.name || ''} ${record.number || ''} ${record.customerName || ''} ${record.email || ''} ${record.phone || ''} ${record.address || ''} ${extra}`.toLowerCase().includes(search.trim().toLowerCase());
-  const money = (amount, code = currency?.code) => formatMoney(amount, currencyFromCode(code || 'UGX'));
+  const money = (amount, code = currency?.code) => formatMoney(amount, currencyFromCode(code || currency?.code));
   useEffect(() => {
     const details = activeWorkspace?.id !== 'personal' ? (activeWorkspace?.details || {}) : (businessProfile || {});
     const person = personalDetails || {};
@@ -46,16 +50,38 @@ export default function BusinessRecordsScreen({ route }) {
   };
   const outstandingCustomer = (id) => invoices.filter((invoice) => invoice.customerId === id).reduce((sum, invoice) => sum + Math.max(0, invoice.total - invoice.amountPaid), 0);
   const outstandingSupplier = (id) => purchases.filter((bill) => bill.supplierId === id).reduce((sum, bill) => sum + Math.max(0, bill.amount - bill.amountPaid), 0);
+  const paymentCurrencyCode = paymentTarget?.kind === 'invoice'
+    ? invoices.find((invoice) => invoice.id === paymentTarget.id)?.currencyCode || currency?.code
+    : paymentTarget?.kind === 'purchase'
+      ? purchases.find((bill) => bill.id === paymentTarget.id)?.currencyCode || currency?.code
+      : currency?.code;
   const save = async (operation, reset) => { setBusy(true); try { await operation(); reset?.(); } catch (error) { Alert.alert('Could not save', error.message || 'Please try again.'); } finally { setBusy(false); } };
 
-  const chooseProduct = (product) => {
-    setInvoiceForm((form) => ({ ...form, name: product.name, unitPrice: String(product.price) }));
-    setMenu('');
+  const chooseProduct = async (product) => {
+    try {
+      const price = await convertAmount(product.price, product.currencyCode || currency?.code, invoiceCurrencyCode);
+      setInvoiceForm((form) => ({ ...form, name: product.name, unitPrice: String(Math.round(price.amount * 100) / 100) }));
+      setMenu('');
+    } catch (error) {
+      Alert.alert('Currency conversion unavailable', error.message || 'Could not convert this product price into the invoice currency.');
+    }
+  };
+  const changeInvoiceCurrency = async (nextCode) => {
+    try {
+      const convertedLines = await Promise.all(lines.map(async (line) => {
+        const quote = await convertAmount(line.unitPrice, line.currencyCode || invoiceCurrencyCode, nextCode);
+        return { ...line, unitPrice: Math.round(quote.amount * 100) / 100, currencyCode: nextCode };
+      }));
+      setLines(convertedLines);
+      setInvoiceCurrencyCode(nextCode);
+    } catch (error) {
+      Alert.alert('Currency conversion unavailable', error.message || 'Could not convert the existing invoice lines.');
+    }
   };
   const addLine = () => {
     const name = invoiceForm.name.trim(); const quantity = toNumber(invoiceForm.quantity, NaN); const unitPrice = toNumber(invoiceForm.unitPrice, NaN);
     if (!name || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) { Alert.alert('Check line item', 'Enter a product or service, quantity, and valid unit price.'); return; }
-    setLines((items) => [...items, { name, quantity, unitPrice }]);
+    setLines((items) => [...items, { name, quantity, unitPrice, currencyCode: invoiceCurrencyCode }]);
     setInvoiceForm((form) => ({ ...form, name: '', quantity: '1', unitPrice: '' }));
   };
   const createInvoice = async () => {
@@ -67,7 +93,7 @@ export default function BusinessRecordsScreen({ route }) {
     const newBalance = savedCustomer ? outstandingCustomer(savedCustomer.id) + taxable * (1 + Math.max(0, toNumber(invoiceForm.taxRate, 0)) / 100) : 0;
     if (savedCustomer?.creditLimit > 0 && newBalance > savedCustomer.creditLimit) { Alert.alert('Credit limit exceeded', 'This invoice would take the customer above their credit limit.'); return; }
     const issuer = { name: invoiceForm.issuerName, email: invoiceForm.issuerEmail, phone: invoiceForm.issuerPhone, alternatePhone: invoiceForm.issuerSecondaryPhone, address: invoiceForm.issuerAddress, city: invoiceForm.issuerCity, country: invoiceForm.issuerCountry, taxId: invoiceForm.issuerTaxId, registrationNumber: invoiceForm.issuerRegistrationNumber, website: invoiceForm.issuerWebsite, contactName: invoiceForm.issuerContactName, contactTitle: invoiceForm.issuerContactTitle };
-    await save(() => addInvoice({ customerId: customer.id, customerName: customer.name, customerEmail: customer.email, customerPhone: customer.phone, customerAddress: customer.address, customerTaxId: customer.taxId, issuer, items: lines, taxRate: invoiceForm.taxRate, discount: invoiceForm.discount, dueDate: invoiceForm.dueDate, paymentLink: invoiceForm.paymentLink, paymentMethod: invoiceForm.paymentMethod, paymentDetails: invoiceForm.paymentDetails, notes: invoiceForm.notes, currency: currency?.code }), () => { setLines([]); setInvoiceForm((form) => ({ ...form, customerId:'', customerName:'', customerEmail:'', customerPhone:'', customerAddress:'', customerTaxId:'', name: '', quantity: '1', unitPrice: '', taxRate: '0', discount: '0', dueDate: '', paymentLink: '', paymentMethod: '', paymentDetails: '', notes: '' })); });
+    await save(() => addInvoice({ customerId: customer.id, customerName: customer.name, customerEmail: customer.email, customerPhone: customer.phone, customerAddress: customer.address, customerTaxId: customer.taxId, issuer, items: lines, taxRate: invoiceForm.taxRate, discount: invoiceForm.discount, dueDate: invoiceForm.dueDate, paymentLink: invoiceForm.paymentLink, paymentMethod: invoiceForm.paymentMethod, paymentDetails: invoiceForm.paymentDetails, notes: invoiceForm.notes, currencyCode: invoiceCurrencyCode }), () => { setLines([]); setInvoiceCurrencyCode(currency?.code || 'UGX'); setInvoiceForm((form) => ({ ...form, customerId:'', customerName:'', customerEmail:'', customerPhone:'', customerAddress:'', customerTaxId:'', name: '', quantity: '1', unitPrice: '', taxRate: '0', discount: '0', dueDate: '', paymentLink: '', paymentMethod: '', paymentDetails: '', notes: '' })); });
   };
   const recordPayment = async () => {
     if (!paymentTarget) return;
@@ -115,8 +141,10 @@ export default function BusinessRecordsScreen({ route }) {
     </Card.Content></Card>
     <Card style={styles.card}><Card.Title title="Record bill or purchase"/><Card.Content>
       <Menu visible={menu === 'supplier'} onDismiss={() => setMenu('')} anchor={<Button mode="outlined" onPress={() => setMenu('supplier')}>{suppliers.find((item) => item.id === purchaseForm.supplierId)?.name || 'Choose supplier'}</Button>}>{suppliers.map((supplier) => <Menu.Item key={supplier.id} title={supplier.name} onPress={() => { setPurchaseForm((form) => ({ ...form, supplierId: supplier.id })); setMenu(''); }}/>)}</Menu>
-      <TextInput label="Purchase or bill description" value={purchaseForm.description} onChangeText={(value) => setPurchaseForm((form) => ({ ...form, description:value }))} style={styles.input}/><TextInput label={`Amount (${currency?.code || 'UGX'})`} value={purchaseForm.amount} onChangeText={(value) => setPurchaseForm((form) => ({ ...form, amount:value }))} keyboardType="decimal-pad" style={styles.input}/><TextInput label="Supplier bill number" value={purchaseForm.billNumber} onChangeText={(value) => setPurchaseForm((form) => ({ ...form, billNumber:value }))} style={styles.input}/><TextInput label="Due date (YYYY-MM-DD)" value={purchaseForm.dueDate} onChangeText={(value) => setPurchaseForm((form) => ({ ...form, dueDate:value }))} style={styles.input}/>
-      <Button mode="contained" loading={busy} onPress={() => { const supplier=suppliers.find((item)=>item.id===purchaseForm.supplierId); save(() => addPurchase({ ...purchaseForm, supplierName:supplier?.name, currency:currency?.code }), () => setPurchaseForm({ supplierId:'', description:'', amount:'', billNumber:'', dueDate:'' })); }}>Save bill</Button>
+      <TextInput label="Purchase or bill description" value={purchaseForm.description} onChangeText={(value) => setPurchaseForm((form) => ({ ...form, description:value }))} style={styles.input}/>
+      <CurrencyPicker value={purchaseCurrencyCode} onChange={setPurchaseCurrencyCode} label="Bill currency" />
+      <TextInput label={`Amount (${purchaseCurrencyCode})`} value={purchaseForm.amount} onChangeText={(value) => setPurchaseForm((form) => ({ ...form, amount:value }))} keyboardType="decimal-pad" style={styles.input}/><TextInput label="Supplier bill number" value={purchaseForm.billNumber} onChangeText={(value) => setPurchaseForm((form) => ({ ...form, billNumber:value }))} style={styles.input}/><TextInput label="Due date (YYYY-MM-DD)" value={purchaseForm.dueDate} onChangeText={(value) => setPurchaseForm((form) => ({ ...form, dueDate:value }))} style={styles.input}/>
+      <Button mode="contained" loading={busy} onPress={() => { const supplier=suppliers.find((item)=>item.id===purchaseForm.supplierId); save(() => addPurchase({ ...purchaseForm, supplierName:supplier?.name, currencyCode:purchaseCurrencyCode }), () => { setPurchaseForm({ supplierId:'', description:'', amount:'', billNumber:'', dueDate:'' }); setPurchaseCurrencyCode(currency?.code || 'UGX'); }); }}>Save bill</Button>
     </Card.Content></Card>
     {suppliers.filter((supplier) => matchesSearch(supplier)).map((supplier) => <Card key={supplier.id} style={styles.card}><Card.Title title={supplier.name} subtitle={`${supplier.contactName || supplier.email || supplier.phone || 'No contact details'} · balance ${money(outstandingSupplier(supplier.id))}`}/><Card.Content><Text>{supplier.address || 'No address'}{supplier.taxId ? ` · Tax ID ${supplier.taxId}` : ''}</Text><Button compact onPress={()=>{setEditingSupplier(supplier.id);setSupplierForm({name:supplier.name,contactName:supplier.contactName||'',email:supplier.email||'',phone:supplier.phone||'',address:supplier.address||'',taxId:supplier.taxId||''});}}>Edit profile</Button>{purchases.filter((bill) => bill.supplierId===supplier.id).map((bill) => <View key={bill.id} style={styles.listRow}><View style={styles.flex}><Text>{bill.billNumber || bill.description}</Text><Text style={styles.meta}>{bill.status} · outstanding {money(bill.amount-bill.amountPaid,bill.currency)}{bill.dueDate ? ` · due ${bill.dueDate}` : ''}</Text>{bill.payments.map((payment) => <Text key={payment.id} style={styles.meta}>Paid {money(payment.amount,bill.currency)} · {payment.date.slice(0,10)}</Text>)}</View>{bill.amountPaid<bill.amount && <Button compact onPress={() => {setPaymentTarget({id:bill.id,kind:'purchase'});setPaymentAmount('');}}>Pay</Button>}</View>)}</Card.Content></Card>)}
     {!suppliers.length && <Text style={styles.empty}>Add a supplier to record bills and purchase payments.</Text>}
@@ -134,8 +162,9 @@ export default function BusinessRecordsScreen({ route }) {
       <Menu visible={menu==='customer'} onDismiss={()=>setMenu('')} anchor={<Button mode="outlined" compact onPress={()=>setMenu('customer')}>{customers.find((item)=>item.id===invoiceForm.customerId)?.name || 'Choose saved customer (optional)'}</Button>}>{customers.map((customer)=><Menu.Item key={customer.id} title={customer.name} onPress={()=>{setInvoiceForm((form)=>({...form,customerId:customer.id,customerName:customer.name,customerEmail:customer.email||'',customerPhone:customer.phone||'',customerAddress:customer.address||'',customerTaxId:customer.taxId||''}));setMenu('');}}/>)}</Menu>
       {!!invoiceForm.customerId && <Button compact onPress={()=>setInvoiceForm((form)=>({...form,customerId:''}))}>Use manual customer details</Button>}
       {['customerName','customerEmail','customerPhone','customerAddress','customerTaxId'].map((key)=><TextInput key={key} label={{customerName:'Customer name',customerEmail:'Customer email',customerPhone:'Customer phone',customerAddress:'Customer address',customerTaxId:'Customer tax ID'}[key]} value={invoiceForm[key]} onChangeText={(value)=>setInvoiceForm((form)=>({...form,[key]:value}))} style={styles.input} />)}
-      <Menu visible={menu==='product'} onDismiss={()=>setMenu('')} anchor={<Button mode="text" onPress={()=>setMenu('product')}>Select saved product</Button>}>{products.map((product)=><Menu.Item key={product.id} title={`${product.name} · ${money(product.price)}`} onPress={()=>chooseProduct(product)}/>)}</Menu>
-      <TextInput label="Product or service" value={invoiceForm.name} onChangeText={(value)=>setInvoiceForm((form)=>({...form,name:value}))} style={styles.input}/><View style={styles.inline}><TextInput label="Qty" value={invoiceForm.quantity} onChangeText={(value)=>setInvoiceForm((form)=>({...form,quantity:value}))} keyboardType="decimal-pad" style={[styles.input,styles.half]}/><TextInput label="Unit price" value={invoiceForm.unitPrice} onChangeText={(value)=>setInvoiceForm((form)=>({...form,unitPrice:value}))} keyboardType="decimal-pad" style={[styles.input,styles.half]}/></View><Button mode="outlined" onPress={addLine}>Add line item</Button>
+      <CurrencyPicker value={invoiceCurrencyCode} onChange={changeInvoiceCurrency} label="Invoice currency" />
+      <Menu visible={menu==='product'} onDismiss={()=>setMenu('')} anchor={<Button mode="text" onPress={()=>setMenu('product')}>Select saved product</Button>}>{products.map((product)=><Menu.Item key={product.id} title={`${product.name} · ${money(product.price, product.currencyCode || currency?.code)}`} onPress={()=>chooseProduct(product)}/>)}</Menu>
+      <TextInput label="Product or service" value={invoiceForm.name} onChangeText={(value)=>setInvoiceForm((form)=>({...form,name:value}))} style={styles.input}/><View style={styles.inline}><TextInput label="Qty" value={invoiceForm.quantity} onChangeText={(value)=>setInvoiceForm((form)=>({...form,quantity:value}))} keyboardType="decimal-pad" style={[styles.input,styles.half]}/><TextInput label={`Unit price (${invoiceCurrencyCode})`} value={invoiceForm.unitPrice} onChangeText={(value)=>setInvoiceForm((form)=>({...form,unitPrice:value}))} keyboardType="decimal-pad" style={[styles.input,styles.half]}/></View><Button mode="outlined" onPress={addLine}>Add line item</Button>
       {lines.map((line,index)=><View key={`${line.name}-${index}`} style={styles.listRow}><Text style={styles.flex}>{line.name} × {line.quantity}</Text><Text>{money(line.quantity*line.unitPrice)}</Text><Button compact onPress={()=>setLines((items)=>items.filter((_,i)=>i!==index))}>Remove</Button></View>)}
       <View style={styles.inline}><TextInput label="Tax %" value={invoiceForm.taxRate} onChangeText={(value)=>setInvoiceForm((form)=>({...form,taxRate:value}))} keyboardType="decimal-pad" style={[styles.input,styles.half]}/><TextInput label="Discount %" value={invoiceForm.discount} onChangeText={(value)=>setInvoiceForm((form)=>({...form,discount:value}))} keyboardType="decimal-pad" style={[styles.input,styles.half]}/></View>
       <TextInput label="Due date (YYYY-MM-DD)" value={invoiceForm.dueDate} onChangeText={(value)=>setInvoiceForm((form)=>({...form,dueDate:value}))} style={styles.input}/><TextInput label="Payment method" placeholder="Mobile Money, bank transfer, cash…" value={invoiceForm.paymentMethod} onChangeText={(value)=>setInvoiceForm((form)=>({...form,paymentMethod:value}))} style={styles.input}/><TextInput label="Payment details" placeholder="Account name, number or instructions" value={invoiceForm.paymentDetails} onChangeText={(value)=>setInvoiceForm((form)=>({...form,paymentDetails:value}))} multiline style={styles.input}/><TextInput label="Payment link (optional)" value={invoiceForm.paymentLink} onChangeText={(value)=>setInvoiceForm((form)=>({...form,paymentLink:value}))} autoCapitalize="none" style={styles.input}/><TextInput label="Notes" value={invoiceForm.notes} onChangeText={(value)=>setInvoiceForm((form)=>({...form,notes:value}))} multiline style={styles.input}/>
@@ -145,7 +174,7 @@ export default function BusinessRecordsScreen({ route }) {
     {!customers.length&&<Text style={styles.empty}>Create a customer profile before making an invoice.</Text>}
   </>;
 
-  return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}><View style={styles.searchArea}><TextInput dense label={`Search ${mode === 'customers' ? 'customers' : mode === 'suppliers' ? 'suppliers' : 'invoices'}`} value={search} onChangeText={setSearch} style={styles.search} /></View><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">{mode==='customers'?customerSection:mode==='suppliers'?supplierSection:invoiceSection}<Portal><Dialog visible={!!paymentTarget} onDismiss={()=>setPaymentTarget(null)}><Dialog.Title>Record payment</Dialog.Title><Dialog.Content><TextInput label={`Amount (${currency?.code || 'UGX'})`} value={paymentAmount} onChangeText={setPaymentAmount} keyboardType="decimal-pad" style={styles.input}/></Dialog.Content><Dialog.Actions><Button onPress={()=>setPaymentTarget(null)}>Cancel</Button><Button onPress={recordPayment}>Save payment</Button></Dialog.Actions></Dialog></Portal></ScrollView></KeyboardAvoidingView>;
+  return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}><View style={styles.searchArea}><TextInput dense label={`Search ${mode === 'customers' ? 'customers' : mode === 'suppliers' ? 'suppliers' : 'invoices'}`} value={search} onChangeText={setSearch} style={styles.search} /></View><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">{mode==='customers'?customerSection:mode==='suppliers'?supplierSection:invoiceSection}<Portal><Dialog visible={!!paymentTarget} onDismiss={()=>setPaymentTarget(null)}><Dialog.Title>Record payment · {paymentCurrencyCode}</Dialog.Title><Dialog.Content><TextInput label={`Amount (${paymentCurrencyCode})`} value={paymentAmount} onChangeText={setPaymentAmount} keyboardType="decimal-pad" style={styles.input}/></Dialog.Content><Dialog.Actions><Button onPress={()=>setPaymentTarget(null)}>Cancel</Button><Button onPress={recordPayment}>Save payment</Button></Dialog.Actions></Dialog></Portal></ScrollView></KeyboardAvoidingView>;
 }
 
 const styles=StyleSheet.create({searchArea:{paddingHorizontal:18,paddingTop:8,backgroundColor:'#f4f6f3'},search:{backgroundColor:'#fff'},container:{...contentWidthStyle,paddingHorizontal:18,paddingTop:10,paddingBottom:120,backgroundColor:'#f4f6f3'},card:{backgroundColor:'#fff',borderRadius:16,marginBottom:14,elevation:1},input:{backgroundColor:'#f7f9f6',marginVertical:6},sectionLabel:{fontWeight:'700',fontSize:14,color:'#315d3b',marginTop:12,marginBottom:4},balance:{fontWeight:'700',color:'#315d3b',marginTop:10,marginBottom:6},meta:{color:'#6e7a70',fontSize:12,marginTop:4},overdue:{color:'#bd4936',fontWeight:'700'},empty:{textAlign:'center',color:'#6e7a70',padding:24},inline:{flexDirection:'row',gap:10},half:{flex:1},listRow:{flexDirection:'row',alignItems:'center',paddingVertical:8,borderBottomWidth:StyleSheet.hairlineWidth,borderColor:'#dde4dc'},flex:{flex:1},actions:{flexDirection:'row',flexWrap:'wrap',alignItems:'center',marginTop:10}});

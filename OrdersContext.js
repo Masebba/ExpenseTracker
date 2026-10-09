@@ -1,14 +1,18 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
 import { AuthContext } from './AuthContext';
-import { makeId, nowIso, toNumber } from './utils/appUtils';
+import { formatMoney, makeId, nowIso, toNumber } from './utils/appUtils';
 import usePersistedState from './utils/usePersistedState';
 import { deleteRecord, replaceCollection, subscribeToCollection, writeRecord } from './services/cloudSync';
 import { AppFeaturesContext } from './AppFeaturesContext';
+import { CurrencyContext } from './CurrencyContext';
+import { convertAmount } from './services/currencyConversion';
+import { currencyFromCode } from './utils/appUtils';
 
 export const OrdersContext = createContext();
 
 export const OrdersProvider = ({ children }) => {
   const { user, activeWorkspace } = useContext(AuthContext);
+  const { currency, detectedCurrency } = useContext(CurrencyContext);
   const { cloudSyncRevision, cloudSyncEnabled } = useContext(AppFeaturesContext);
   const scopeId = activeWorkspace?.id || 'personal';
   const storageKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}orders` : 'expenseTracker.guest.orders';
@@ -32,20 +36,32 @@ export const OrdersProvider = ({ children }) => {
     const total = toNumber(data.total, NaN);
     if (!data.customerName?.trim() || !data.productName?.trim()) throw new Error('Customer name and product name are required.');
     if (!Number.isFinite(total) || total <= 0) throw new Error('Order total must be greater than zero.');
-    const order = { id: makeId('order'), customerName: data.customerName.trim(), customerPhone: String(data.customerPhone || '').trim(), productName: data.productName.trim(), total: Math.round(total * 100) / 100, status: 'Pending', installments: [], createdAt: nowIso(), updatedAt: nowIso() };
+    const currencyCode = String(data.currencyCode || currency?.code || detectedCurrency?.code || 'UGX').toUpperCase();
+    const conversion = await convertAmount(total, currencyCode, currency?.code || 'UGX');
+    const order = { id: makeId('order'), customerName: data.customerName.trim(), customerPhone: String(data.customerPhone || '').trim(), productName: data.productName.trim(), total: Math.round(total * 100) / 100, currencyCode, currency: currencyCode, currencySymbol: currencyFromCode(currencyCode).symbol, baseAmount: Math.round(conversion.amount * 1000000) / 1000000, baseCurrencyCode: currency?.code || 'UGX', exchangeRate: conversion.rate, exchangeRateTimestamp: conversion.timestamp, status: 'Pending', installments: [], createdAt: nowIso(), updatedAt: nowIso() };
     await writeRecord(user?.uid, 'orders', order, scopeId);
     setOrders((current) => [...current, order]);
     return order;
-  }, [setOrders, user?.uid, scopeId]);
+  }, [setOrders, user?.uid, scopeId, currency?.code, detectedCurrency?.code]);
 
   const updateOrder = useCallback(async (id, updates) => {
     const current = orders.find((x) => x.id === id);
     if (!current) return;
-    const updated = { ...current, ...updates, total: updates.total === undefined ? current.total : toNumber(updates.total, NaN), updatedAt: nowIso() };
+    const currencyCode = String(updates.currencyCode || current.currencyCode || detectedCurrency?.code || currency?.code || 'UGX').toUpperCase();
+    const updated = { ...current, ...updates, total: updates.total === undefined ? current.total : toNumber(updates.total, NaN), currencyCode, updatedAt: nowIso() };
     if (!Number.isFinite(updated.total) || updated.total <= 0) throw new Error('Order total must be greater than zero.');
+    if (updated.total !== current.total || currencyCode !== (current.currencyCode || current.currency)) {
+      const conversion = await convertAmount(updated.total, currencyCode, currency?.code || 'UGX');
+      updated.currency = currencyCode;
+      updated.currencySymbol = currencyFromCode(currencyCode).symbol;
+      updated.baseAmount = Math.round(conversion.amount * 1000000) / 1000000;
+      updated.baseCurrencyCode = currency?.code || 'UGX';
+      updated.exchangeRate = conversion.rate;
+      updated.exchangeRateTimestamp = conversion.timestamp;
+    }
     await writeRecord(user?.uid, 'orders', updated, scopeId);
     setOrders((items) => items.map((x) => x.id === id ? updated : x));
-  }, [orders, setOrders, user?.uid, scopeId]);
+  }, [orders, setOrders, user?.uid, scopeId, currency?.code, detectedCurrency?.code]);
 
   const deleteOrder = useCallback(async (id) => {
     if (user?.uid) await deleteRecord(user.uid, 'orders', id, scopeId);
@@ -59,13 +75,15 @@ export const OrdersProvider = ({ children }) => {
     if (!current) throw new Error('Order not found.');
     const paid = (current.installments || []).reduce((sum, item) => sum + toNumber(item.amount), 0);
     const remaining = Math.max(0, current.total - paid);
-    if (value > remaining) throw new Error(`Installment cannot exceed the remaining balance of ${remaining.toFixed(2)}.`);
-    const installment = { id: makeId('inst'), amount: Math.round(value * 100) / 100, date: nowIso() };
+    if (value > remaining) throw new Error(`Installment cannot exceed the remaining balance of ${formatMoney(remaining, currencyFromCode(current.currencyCode || currency?.code))}.`);
+    const transactionCurrencyCode = current.currencyCode || detectedCurrency?.code || currency?.code || 'UGX';
+    const conversion = await convertAmount(value, transactionCurrencyCode, currency?.code || 'UGX');
+    const installment = { id: makeId('inst'), amount: Math.round(value * 100) / 100, currencyCode: transactionCurrencyCode, currencySymbol: currencyFromCode(transactionCurrencyCode).symbol, baseAmount: Math.round(conversion.amount * 1000000) / 1000000, baseCurrencyCode: currency?.code || 'UGX', exchangeRate: conversion.rate, exchangeRateTimestamp: conversion.timestamp, date: nowIso() };
     const updated = { ...current, installments: [...(current.installments || []), installment], status: paid + value >= current.total ? 'Completed' : 'Pending', updatedAt: nowIso() };
     await writeRecord(user?.uid, 'orders', updated, scopeId);
     setOrders((list) => list.map((x) => x.id === id ? updated : x));
     return installment;
-  }, [orders, setOrders, user?.uid, scopeId]);
+  }, [orders, setOrders, user?.uid, scopeId, currency?.code, detectedCurrency?.code]);
 
   const setOrdersSafe = useCallback((updater) => {
     const next = typeof updater === 'function' ? updater(orders) : updater;
