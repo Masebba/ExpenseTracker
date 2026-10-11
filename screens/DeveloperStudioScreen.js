@@ -16,7 +16,7 @@ const formatDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1
 const parseDate = (value) => value ? new Date(`${value}T12:00:00`) : new Date();
 const monthLabel = (date) => date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
-export default function DeveloperStudioScreen() {
+export default function DeveloperStudioScreen({ navigation }) {
   const { user, isDeveloper, refreshDeveloperAccess } = useContext(AuthContext);
   const { ads, addAd, updateAd, removeAd } = useContext(AppFeaturesContext);
   const [access, setAccess] = useState(null);
@@ -139,6 +139,10 @@ export default function DeveloperStudioScreen() {
   </ScrollView></KeyboardAvoidingView>;
 
   return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'}><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+    <Card style={styles.card}><Card.Content>
+      <Text style={styles.copy}>Need help with the administrator tools?</Text>
+      <Button mode="outlined" icon="help-circle-outline" onPress={() => navigation.navigate('HelpCentre')}>Open Help Centre</Button>
+    </Card.Content></Card>
     <Card style={styles.card}><Card.Title title="New advert" subtitle="Shown to app users on the home screen." /><Card.Content>
       <TextInput label="Business name (optional)" value={business} onChangeText={setBusiness} style={styles.businessInput} />
       <TextInput label="Banner headline (optional)" value={title} onChangeText={setTitle} style={styles.input} />

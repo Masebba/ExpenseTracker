@@ -30,6 +30,7 @@ import ReportsScreen from "./screens/ReportsScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 import WorkspacesScreen from "./screens/WorkspacesScreen";
 import DeveloperStudioScreen from "./screens/DeveloperStudioScreen";
+import HelpCentreScreen from "./screens/HelpCentreScreen";
 import AuthNavigator from "./AuthNavigator";
 
 const BottomTab = createBottomTabNavigator();
@@ -150,6 +151,13 @@ function AppNavigator() {
               }}
             />
           )}
+          <RootStack.Screen
+            name="HelpCentre"
+            component={HelpCentreScreen}
+            options={{
+              headerShown: false,
+            }}
+          />
         </RootStack.Navigator>
       ) : (
         <AuthNavigator />

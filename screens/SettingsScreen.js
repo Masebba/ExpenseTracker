@@ -16,7 +16,7 @@ import { CurrencyContext } from '../CurrencyContext';
 import CurrencyPicker from '../components/CurrencyPicker';
 
 export default function SettingsScreen({ navigation }) {
-  const { user, guestMode, openAccountAccess, exitGuestMode, reloadLocalData, profileImage, updateProfileImage, signOut, updateUserProfile, updateUserData, personalDetails, updatePersonalDetails, businessProfile, updatePersonalBusinessProfile, activeWorkspace, exportMyData, deleteMyAccount } = useContext(AuthContext);
+  const { user, guestMode, openAccountAccess, exitGuestMode, reloadLocalData, profileImage, updateProfileImage, signOut, updateUserProfile, updateUserData, personalDetails, updatePersonalDetails, activeWorkspace, exportMyData, deleteMyAccount } = useContext(AuthContext);
   const { currency, detectedCurrency, setCurrencyCode } = useContext(CurrencyContext);
   const storageOwner = user?.uid || (guestMode ? 'guest' : null);
   const isPersonalWorkspace = activeWorkspace?.id === 'personal';
@@ -30,10 +30,8 @@ export default function SettingsScreen({ navigation }) {
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [businessForm, setBusinessForm] = useState({ legalName:'', email:'', phone:'', alternatePhone:'', address:'', city:'', country:'', taxId:'', registrationNumber:'', website:'', contactName:'', contactTitle:'', paymentMethod:'', paymentDetails:'' });
   const [personalForm, setPersonalForm] = useState({ alternatePhone:'', jobTitle:'', address:'', city:'', country:'', taxId:'', website:'', paymentMethod:'', paymentDetails:'' });
   const [showPersonalDetails, setShowPersonalDetails] = useState(false);
-  const [showBusinessDetails, setShowBusinessDetails] = useState(false);
   const [externalFolder, setExternalFolder] = useState(null);
   const [backupStatus, setBackupStatus] = useState('');
 
@@ -46,7 +44,6 @@ export default function SettingsScreen({ navigation }) {
     }
   }, [user, profileImage]);
 
-  useEffect(() => { setBusinessForm((form) => ({ ...form, ...(businessProfile || {}) })); }, [businessProfile]);
   useEffect(() => { setPersonalForm((form) => ({ ...form, ...(personalDetails || {}) })); }, [personalDetails]);
   useFocusEffect(useCallback(() => {
     getExternalBackupFolder(storageOwner).then(setExternalFolder).catch(() => {});
@@ -54,12 +51,6 @@ export default function SettingsScreen({ navigation }) {
   }, [storageOwner]));
 
   useEffect(() => subscribeExternalBackupStatus(storageOwner, (status) => setBackupStatus(status || '')), [storageOwner]);
-
-  const saveBusinessDetails = async () => {
-    try { setSaving(true); await updatePersonalBusinessProfile(businessForm); Alert.alert('Saved', 'Your invoice business details have been saved.'); }
-    catch (error) { Alert.alert('Could not save details', error.message || 'Try again.'); }
-    finally { setSaving(false); }
-  };
 
   const savePersonalDetails = async () => {
     try { setSaving(true); await updatePersonalDetails(personalForm); Alert.alert('Saved', 'Your optional details are ready to use on invoices.'); }
@@ -192,17 +183,7 @@ export default function SettingsScreen({ navigation }) {
       <Button mode="outlined" compact loading={saving} onPress={savePersonalDetails}>Save personal details</Button>
       </>}
     </View>}
-    {user && isPersonalWorkspace && <View style={styles.detailsSection}>
-      <Button mode="outlined" icon={showBusinessDetails ? 'chevron-up' : 'briefcase-edit-outline'} onPress={() => setShowBusinessDetails((visible) => !visible)}>
-        {showBusinessDetails ? 'Close business details' : 'My business details for invoices'}
-      </Button>
-      {showBusinessDetails && <>
-      <Text style={styles.storageHint}>Optional details used when you create an invoice from your personal workspace.</Text>
-      {Object.keys(businessForm).map((key)=><TextInput key={key} label={{legalName:'Registered business name',email:'Business email',phone:'Business phone',alternatePhone:'Alternate business phone',address:'Business address',city:'City or town',country:'Country',taxId:'Tax identification number',registrationNumber:'Company registration number',website:'Website',contactName:'Invoice contact person',contactTitle:'Contact person role',paymentMethod:'Preferred payment method',paymentDetails:'Payment instructions or account details'}[key]} value={businessForm[key]||''} onChangeText={(value)=>setBusinessForm((form)=>({...form,[key]:value}))} style={styles.input} />)}
-      <Button mode="contained" compact loading={saving} onPress={saveBusinessDetails}>Save business details</Button>
-      </>}
-    </View>}
-    {user && !isPersonalWorkspace && <View style={styles.detailsSection}><Text style={styles.storageHint}>Company and organisation invoice details are managed with each workspace.</Text><Button compact mode="outlined" onPress={()=>navigation.navigate('Workspaces')}>Manage workspace details</Button></View>}
+    <Button mode="outlined" icon="help-circle-outline" onPress={() => navigation.navigate('HelpCentre')} style={styles.button}>Help Centre</Button>
     <View style={styles.detailsSection}>
       <Text style={styles.sectionTitle}>Base currency</Text>
       <Text style={styles.storageHint}>Automatically detected as {detectedCurrency.code}. Your preference ({currency.code}) is used for new transactions and reporting; existing transaction amounts are not changed.</Text>
