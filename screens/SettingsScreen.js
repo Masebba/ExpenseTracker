@@ -75,14 +75,14 @@ export default function SettingsScreen({ navigation }) {
     try {
       setSaving(true);
       const data = await exportMyData();
-      const fileUri = `${FileSystem.cacheDirectory}ExpenseTracker-export-${Date.now()}.json`;
+      const fileUri = `${FileSystem.cacheDirectory}FinanceTracker-export-${Date.now()}.json`;
       await FileSystem.writeAsStringAsync(fileUri, data);
       // Load this native module only when export is requested. This lets the
       // app open in an older development binary and gives a useful recovery
       // message until that binary is rebuilt with expo-sharing included.
       const Sharing = await import('expo-sharing');
       if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing is not available on this device.');
-      await Sharing.shareAsync(fileUri, { mimeType: 'application/json', dialogTitle: 'Export ExpenseTracker data' });
+      await Sharing.shareAsync(fileUri, { mimeType: 'application/json', dialogTitle: 'Export FinanceTracker data' });
     }
     catch (error) {
       const missingNativeModule = String(error?.message || '').includes("Cannot find native module 'ExpoSharing'");
@@ -116,7 +116,7 @@ export default function SettingsScreen({ navigation }) {
       const nativeModuleMissing = String(error?.message || '').includes("Cannot find native module 'ExpoDocumentPicker'");
       Alert.alert('Restore unavailable', nativeModuleMissing
         ? 'This installed app does not include the native document picker. Rebuild and reinstall the Android development app, then try again.'
-        : error.message || 'Choose a valid ExpenseTracker JSON backup.');
+        : error.message || 'Choose a valid FinanceTracker JSON backup.');
     }
   };
 
@@ -192,15 +192,17 @@ export default function SettingsScreen({ navigation }) {
     <Text style={styles.helper}>Dates and times follow your device’s region settings.</Text>
     <TermsOfServiceButton style={styles.button} />
     <View style={styles.storageCard}>
-      <Text style={styles.storageTitle}>Data storage</Text>
-      <View style={styles.storageChoice}><MaterialCommunityIcons name="cellphone-check" size={20} color="#315d3b"/><Text style={styles.infoText}>This device · default</Text></View>
+      <Text style={styles.storageTitle}>Data storage and recovery</Text>
+      <View style={styles.storageChoice}><MaterialCommunityIcons name="cellphone-check" size={20} color="#315d3b"/><Text style={styles.infoText}>Saved on this device · works offline</Text></View>
+      <Text style={styles.storageHint}>Your records are saved locally and remain available without internet. They are not currently synchronized as shared ledger records to the cloud. Uninstalling the app or losing this device can remove the local copy. Export a backup regularly or connect an external folder below.</Text>
+      <View style={styles.storageChoice}><MaterialCommunityIcons name="cloud-upload-outline" size={20} color={externalFolder ? "#315d3b" : "#8a6b2f"}/><Text style={styles.infoText}>{externalFolder ? 'External backup folder connected' : 'No external backup connected'}</Text></View>
       {user && <View style={styles.storageRow}><Text style={[styles.infoText, { flex: 1 }]}>Workspace record sync</Text><Switch value={cloudSyncEnabled} disabled onValueChange={(value) => toggleCloudSync(value).catch((error) => Alert.alert('Could not update backup', error.message))} /></View>}
       <View style={styles.externalRow}><View style={{flex:1}}><Text style={styles.infoText}>External folder backup</Text>{!!externalFolder && <Text style={styles.storageHint}>Connected</Text>}</View><Button compact mode={externalFolder?'outlined':'contained'} disabled={saving} onPress={externalFolder?disconnectExternalFolder:chooseExternalFolder}>{externalFolder?'Disconnect':'Choose folder'}</Button></View>
-      <View style={styles.externalRow}><Text style={[styles.storageHint,{flex:1}]}>{backupStatus || (externalFolder ? 'No successful backup recorded yet.' : 'No external backup configured.')}</Text><Button compact disabled={saving || !externalFolder} onPress={retryBackup}>Back up now</Button></View>
+      <View style={styles.externalRow}><Text style={[styles.storageHint,{flex:1}]}>{backupStatus || (externalFolder ? 'Folder connected, but no successful backup is recorded yet.' : 'Local storage is active. No separate backup exists until you export data or connect a folder.')}</Text><Button compact disabled={saving || !externalFolder} onPress={retryBackup}>Back up now</Button></View>
     </View>
     <Button mode="outlined" disabled={saving} onPress={exportData} style={styles.button}>Export my data</Button>
     <Button mode="outlined" disabled={saving} onPress={restoreData} style={styles.button}>Restore or import backup</Button>
-    {guestMode && <View style={styles.detailsSection}><Text style={styles.sectionTitle}>Using ExpenseTracker without an account</Text><Text style={styles.storageHint}>Your ledger stays on this device. Sign in or create an account only when you want account features such as company workspaces. If you sign in on this device, the guest ledger is copied into that account's local records. Exiting guest mode keeps the ledger on this device; choose Continue without an account to return to it.</Text><Button mode="contained" onPress={() => openAccountAccess().catch((error) => Alert.alert('Could not open account access', error.message))}>Sign in or create account</Button></View>}
+    {guestMode && <View style={styles.detailsSection}><Text style={styles.sectionTitle}>Using FinanceTracker without an account</Text><Text style={styles.storageHint}>Your ledger stays on this device. Sign in or create an account only when you want account features such as company workspaces. If you sign in on this device, the guest ledger is copied into that account's local records. Exiting guest mode keeps the ledger on this device; choose Continue without an account to return to it.</Text><Button mode="contained" onPress={() => openAccountAccess().catch((error) => Alert.alert('Could not open account access', error.message))}>Sign in or create account</Button></View>}
     <Button mode="contained" onPress={() => (guestMode ? exitGuestMode() : signOut()).catch((e) => Alert.alert('Error', e.message))} style={styles.button}>{guestMode ? 'Exit guest mode' : 'Sign Out'}</Button>
     {user && <Button mode="text" textColor="#b3261e" disabled={saving} onPress={confirmDeleteAccount} style={styles.button}>Delete account and personal data</Button>}
     {user && <Portal><Modal visible={deleteModalVisible} onDismiss={() => { setDeleteModalVisible(false); setDeletePassword(''); }} contentContainerStyle={styles.modal}>

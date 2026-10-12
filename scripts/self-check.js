@@ -66,6 +66,18 @@ const organizations = fs.readFileSync(path.join(root, 'services', 'organizations
 check('invitation lookup normalizes email', organizations.includes('normalizedEmail'), true);
 const entry = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
 check('startup error boundary exists', entry.includes('StartupErrorBoundary'), true);
+check('app module is loaded inside startup boundary', entry.includes("require('./App').default"), true);
+const firebaseConfig = fs.readFileSync(path.join(root, 'firebase.json'), 'utf8');
+check('Firebase deploy config includes composite indexes', firebaseConfig.includes('firestore.indexes.json'), true);
+const indexes = JSON.parse(fs.readFileSync(path.join(root, 'firestore.indexes.json'), 'utf8'));
+check('invitation collection-group composite index exists', indexes.indexes.some((item) => item.collectionGroup === 'invitations' && item.queryScope === 'COLLECTION_GROUP' && item.fields.some((field) => field.fieldPath === 'email') && item.fields.some((field) => field.fieldPath === 'status')), true);
+const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+check('production EAS environment is explicit', eas.build.production.environment, 'production');
+const appConfig = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'));
+check('runtime version follows app version', appConfig.expo.runtimeVersion, { policy: 'appVersion' });
+const gradle = fs.readFileSync(path.join(root, 'android', 'app', 'build.gradle'), 'utf8');
+check('release build does not use debug signing', gradle.includes('signingConfig signingConfigs.release'), true);
+check('release signing fails closed when credentials are absent', gradle.includes('Release signing credentials are missing'), true);
 
 const { calculateExchangeRate, convertAmount, getExchangeRate } = require('../services/currencyConversion');
 const rateDate = Date.now();

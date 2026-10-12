@@ -53,7 +53,7 @@ export default function HelpCentreScreen() {
   }, [search]);
 
   const contactSupport = async () => {
-    const subject = encodeURIComponent('ExpenseTracker support request');
+    const subject = encodeURIComponent('FinanceTracker support request');
     const body = encodeURIComponent('Please describe your question or issue:\n\n\nApp version: 1.0.0');
     try {
       await Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`);

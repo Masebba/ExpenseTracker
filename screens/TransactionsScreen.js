@@ -13,7 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 const filters = ["daily", "weekly", "monthly", "all"];
 
-export default function TransactionsScreen() {
+export default function TransactionsScreen({ navigation }) {
   const { transactions, clearTransactions } = useContext(TransactionsContext);
   const { currency } = useContext(CurrencyContext);
   const [filter, setFilter] = useState("daily");
@@ -66,9 +66,15 @@ export default function TransactionsScreen() {
                 (positive ? "Income" : "Expense")}
             </Text>
             <Text style={styles.meta}>
-              {item.category || "Uncategorized"} ·{" "}
-              {new Date(item.timestamp).toLocaleString()}
+              {item.category || "Uncategorized"} · {new Date(item.timestamp).toLocaleString()}
             </Text>
+            {item.baseAmount !== undefined && item.baseCurrencyCode && item.baseCurrencyCode !== (item.currencyCode || item.currency) && (
+              <Text style={styles.conversionMeta}>
+                Recorded reporting value: {formatMoney(item.baseAmount, currencyFromCode(item.baseCurrencyCode))}
+                {Number.isFinite(Number(item.exchangeRate)) ? ` · Rate ${Number(item.exchangeRate).toLocaleString(undefined, { maximumFractionDigits: 8 })}` : ''}
+                {item.exchangeRateTimestamp ? ` · ${new Date(item.exchangeRateTimestamp).toLocaleString()}` : ''}
+              </Text>
+            )}
           </View>
           <Text
             style={[styles.amount, { color: positive ? "#267a46" : "#bd4936" }]}
@@ -128,7 +134,11 @@ export default function TransactionsScreen() {
             filtered.length ? styles.list : styles.emptyContainer
           }
           ListEmptyComponent={
-            <Text style={styles.empty}>No transactions in this period.</Text>
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>{transactions.length ? 'No matching transactions' : 'Your transaction ledger is ready'}</Text>
+              <Text style={styles.empty}>{transactions.length ? 'Try another period or adjust your search.' : 'Record money received or spent here. Other business records, including products, customers, suppliers and invoices, are available from Home.'}</Text>
+              {!transactions.length && <View style={styles.emptyActions}><Button mode="contained" onPress={() => navigation.navigate('Home', { screen: 'Income' })}>Record income</Button><Button mode="outlined" onPress={() => navigation.navigate('Home', { screen: 'Expense' })}>Record expense</Button></View>}
+            </View>
           }
         />
       </View>
@@ -194,5 +204,9 @@ const styles = StyleSheet.create({
   meta: { color: "#79847b", fontSize: 10, marginTop: 4 },
   amount: { fontWeight: "700", fontSize: 12, marginLeft: 5 },
   emptyContainer: { flexGrow: 1, justifyContent: "center" },
-  empty: { color: "#78837a", textAlign: "center", padding: 30 },
+  empty: { color: "#78837a", textAlign: "center", paddingHorizontal: 18, paddingVertical: 10, lineHeight: 20 },
+  emptyState: { alignItems: "center", paddingVertical: 36, paddingHorizontal: 10 },
+  emptyTitle: { color: "#24432b", fontSize: 16, fontWeight: "700", textAlign: "center" },
+  emptyActions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 8 },
+  conversionMeta: { color: "#68776c", fontSize: 10, lineHeight: 15, marginTop: 4, paddingRight: 4 },
 });

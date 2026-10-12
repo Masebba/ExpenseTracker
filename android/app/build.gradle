@@ -104,15 +104,32 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            // EAS/Gradle release credentials are supplied through Gradle
+            // properties. Never sign a production artifact with the debug key.
+            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE') &&
+                project.hasProperty('MYAPP_UPLOAD_STORE_PASSWORD') &&
+                project.hasProperty('MYAPP_UPLOAD_KEY_ALIAS') &&
+                project.hasProperty('MYAPP_UPLOAD_KEY_PASSWORD')) {
+                storeFile file(MYAPP_UPLOAD_STORE_FILE)
+                storePassword MYAPP_UPLOAD_STORE_PASSWORD
+                keyAlias MYAPP_UPLOAD_KEY_ALIAS
+                keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (!project.hasProperty('MYAPP_UPLOAD_STORE_FILE') ||
+                !project.hasProperty('MYAPP_UPLOAD_STORE_PASSWORD') ||
+                !project.hasProperty('MYAPP_UPLOAD_KEY_ALIAS') ||
+                !project.hasProperty('MYAPP_UPLOAD_KEY_PASSWORD')) {
+                throw new GradleException('Release signing credentials are missing. Configure an EAS Android production keystore before building a release.')
+            }
+            signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

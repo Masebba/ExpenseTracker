@@ -10,17 +10,23 @@
 - [x] Invitation lookup normalizes email input before querying Firestore.
 - [x] Missing Firebase build config now shows a startup recovery screen instead of crashing (`index.js` error boundary).
 - [x] Added dependency-free `npm run check:self` (`scripts/self-check.js`) for money parsing, backup key scoping, and release-gate copy.
+- [x] Added a Firestore collection-group composite index for invitation lookup and wired it into `firebase.json`.
+- [x] Made the EAS production environment explicit in `eas.json`.
+- [x] Changed Expo runtime-version policy to follow the app version and aligned the checked-in Android runtime string to `1.0.1`. Keep the Android string aligned manually while the native `android/` project is checked in.
+- [x] Changed startup module loading so errors thrown while importing `App` can be caught by the startup error boundary.
+- [x] Changed Android release signing to require release keystore properties rather than silently using the debug signing key.
 
 ## Remaining release blockers (not code-complete)
 
 - [ ] Replace all placeholders in `PRIVACY_POLICY.md`, publish it at a public URL, and add that URL to the Play listing.
 - [ ] Complete Google Play Data safety, content rating, target audience, app access, ads, and financial features declarations based on the actual production build and Firebase configuration.
-- [ ] Confirm Firebase production project, Authentication providers, Firestore and Storage rules, billing limits, backups, monitoring, and support ownership. Deploy rules from this repository only after reviewing them against production data.
+- [ ] Deploy the invitation index with `firebase deploy --only firestore:indexes`; wait until the index is enabled.
+- [ ] Confirm Firebase production project, Authentication providers, Firestore and Storage rules, Storage bucket existence, billing limits, backups, monitoring, and support ownership. Deploy rules from this repository only after reviewing them against production data.
 - [ ] Deploy the resumable `deleteMyAccount` Firebase Function, verify ownership blocks and retry after injected failures, and confirm Auth is deleted only after all cleanup phases complete.
 - [ ] Keep `CLOUD_SYNC_RELEASE_BLOCKED` enabled. Production record sync is a blocker until offline edit/delete queues, conflict resolution, retry behavior, and two-device QA are designed and reviewed.
-- [ ] Configure EAS production environment values for every `EXPO_PUBLIC_FIREBASE_*` key. These Firebase client values are embedded in the app and are not server secrets; enforce security with Firebase rules.
+- [ ] Configure EAS production environment values for every `EXPO_PUBLIC_FIREBASE_*` key, then verify with `eas env:list --environment production`. These Firebase client values are embedded in the app and are not server secrets; enforce security with Firebase rules.
 - [ ] Set the final app name, package ID, icon/adaptive icon, splash screen, screenshots, store description, support email, and publisher identity.
-- [ ] Build an Android App Bundle with `npm run build:android:production`; verify Play App Signing and upload it to the internal testing track.
+- [ ] Confirm EAS has a valid Android production keystore and the Gradle release-signing properties are injected. Build an Android App Bundle with `npm run build:android:production`; verify the artifact certificate and Play App Signing before uploading to internal testing.
 - [ ] Install the Play internal build on physical Android devices. Check fresh install, upgrade, account creation/sign-in/reset, no-network use, permission denial, data export, account deletion, navigation, keyboard, and small-screen behavior.
 - [ ] On physical Android devices, validate offline use; personal and multi-workspace switching; sync status and conflict scenarios; account deletion including retry after partial failure; keyboard visibility; smallest supported screen; and backup export, restore, malformed file, wrong-account file, and interrupted restore recovery.
 - [ ] Verify search and filters with large transaction, product, customer, supplier, invoice, sale, and order lists.

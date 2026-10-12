@@ -10,10 +10,10 @@ export const TERMS_OF_SERVICE_PATH = ['appContent', 'termsOfService'];
 export const TERMS_OF_SERVICE_MAX_LENGTH = 20000;
 
 export const DEFAULT_TERMS_OF_SERVICE = [
-  'ExpenseTracker — Terms of Service and Data Information',
+  'FinanceTracker — Terms of Service and Data Information',
   '',
   'Using the app',
-  'ExpenseTracker provides personal and organisation workspaces for recording business activity. Keep your account credentials private and review entries before relying on reports or exports.',
+  'FinanceTracker provides personal and organisation workspaces for recording business activity. Keep your account credentials private and review entries before relying on reports or exports.',
   '',
   'Personal and organisation records',
   'Your personal ledger stays in private app storage on this device and is available offline. Guest records also stay on this device. In this release, organisation ledger records such as transactions, products, sales, orders, customers, suppliers and invoices are not uploaded; workspace record sync is disabled. Organisation membership and workspace administration are separate from those ledger records.',

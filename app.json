@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "ExpenseTracker",
+    "name": "FinanceTracker",
     "slug": "expense-tracker-masebba",
     "scheme": "expensetracker",
     "version": "1.0.1",
@@ -54,8 +54,9 @@
       "expo-sharing",
       "expo-document-picker"
     ],
-    "runtimeVersion": "1.0.0",
-
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "updates": {
       "url": "https://u.expo.dev/e686eb7d-2e35-4e19-82e7-3d811f8a4cc1"
     }

@@ -316,7 +316,7 @@ export const AuthProvider = ({ children }) => {
         }
       }
     } catch { cloudData.memberships = null; }
-    return JSON.stringify({ format: 'ExpenseTracker export', version: 1, exportedAt: new Date().toISOString(), uid: ownerId, localData, cloudData, organizationData }, null, 2);
+    return JSON.stringify({ format: 'FinanceTracker export', version: 1, exportedAt: new Date().toISOString(), uid: ownerId, localData, cloudData, organizationData }, null, 2);
   };
 
   const deleteMyAccount = async (password) => {

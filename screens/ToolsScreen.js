@@ -51,7 +51,7 @@ export default function ToolsScreen({ route }) {
     setRateStatus('Updating exchange rate…');
     getExchangeRate(from, to)
       .then((latest) => {
-        if (active) { setExchangeRate(String(latest.rate)); setRateStatus(`Rate updated ${new Date(latest.timestamp).toLocaleDateString()}`); }
+        if (active) { setExchangeRate(String(latest.rate)); setRateStatus(`Rate: 1 ${from} = ${Number(latest.rate).toLocaleString(undefined, { maximumFractionDigits: 8 })} ${to}\nRate timestamp: ${new Date(latest.timestamp).toLocaleString()}\nIndicative market rate, not a guaranteed bank or mobile-money settlement rate.`); }
       })
       .catch((error) => { if (active) setRateStatus(error.message || 'Exchange rate is temporarily unavailable.'); });
     return () => { active = false; };
@@ -80,8 +80,9 @@ export default function ToolsScreen({ route }) {
             {orderedCurrencies.map((code) => <Menu.Item key={code} title={`${currencyFromCode(code).symbol}  ${code}`} onPress={() => { setTo(code); setMenu(null); }} />)}
           </Menu>
         </View>
-        <TextInput label={`1 ${from} = ? ${to}`} value={exchangeRate} onChangeText={setExchangeRate} keyboardType="decimal-pad" style={styles.input} />
+        <TextInput label={`1 ${from} = ? ${to}`} value={exchangeRate} onChangeText={(value) => { setExchangeRate(value); setRateStatus(`Manual rate entered. 1 ${from} = ${value} ${to}. Verify this rate before using it for a real transaction.`); }} keyboardType="decimal-pad" style={styles.input} />
         <Text style={styles.rateStatus}>{rateStatus}</Text>
+        <Text style={styles.rateDisclosure}>The amount below is an estimate using the displayed rate. Providers may apply fees or a different settlement rate.</Text>
         <View style={styles.result}><Text style={styles.resultLabel}>Converted amount</Text><Text style={styles.resultAmount}>{formatMoney(converted, currencyFromCode(to))}</Text></View>
       </Card.Content>
     </Card>}
@@ -105,7 +106,7 @@ export default function ToolsScreen({ route }) {
 const styles = StyleSheet.create({
   container: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24, backgroundColor: '#f4f6f3' },
   card: { borderRadius: 18, backgroundColor: '#fff', marginBottom: 14, elevation: 1 },
-  input: { backgroundColor: '#f7f9f6', marginVertical: 7 }, currencyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18, marginVertical: 7 }, arrow: { fontSize: 20, color: '#59715d' }, rateStatus: { fontSize: 11, color: '#768178', marginVertical: 3 },
+  input: { backgroundColor: '#f7f9f6', marginVertical: 7 }, currencyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18, marginVertical: 7 }, arrow: { fontSize: 20, color: '#59715d' }, rateStatus: { fontSize: 11, color: '#536357', lineHeight: 17, marginVertical: 5 }, rateDisclosure: { fontSize: 11, color: '#78837a', lineHeight: 16, marginTop: 3 },
   result: { borderRadius: 14, backgroundColor: '#edf4ed', padding: 15, marginTop: 8 }, resultLabel: { color: '#637369', fontSize: 12 }, resultAmount: { color: '#24432b', fontSize: 24, fontWeight: '800', marginTop: 4 },
   targets: { flexDirection:'row', justifyContent:'space-between', marginBottom:6 },
   button: { marginVertical: 8, borderRadius: 24 }, budgetRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }, spent: { color: '#bd4936', fontWeight: '700' }, remaining: { color: '#267a46', fontWeight: '700' }, track: { height: 8, backgroundColor: '#e7ece7', borderRadius: 5, marginTop: 10, overflow: 'hidden' }, fill: { height: '100%', borderRadius: 5 },

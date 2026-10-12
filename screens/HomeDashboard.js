@@ -16,6 +16,10 @@ import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityI
 import { TransactionsContext } from "../TransactionsContext";
 import { CurrencyContext } from "../CurrencyContext";
 import { AppFeaturesContext } from "../AppFeaturesContext";
+import { ProductsContext } from "../ProductsContext";
+import { SalesContext } from "../SalesContext";
+import { OrdersContext } from "../OrdersContext";
+import { BusinessRecordsContext } from "../BusinessRecordsContext";
 import { inPeriod, formatMoney, isValidHttpUrl, CONTENT_MAX_WIDTH, contentWidthStyle } from "../utils/appUtils";
 import useReportingAmounts from "../hooks/useReportingAmounts";
 
@@ -63,6 +67,10 @@ const shortcuts = [
 
 export default function HomeDashboard({ navigation }) {
   const { transactions } = useContext(TransactionsContext);
+  const { products = [] } = useContext(ProductsContext);
+  const { sales = [] } = useContext(SalesContext);
+  const { orders = [] } = useContext(OrdersContext);
+  const { customers = [], suppliers = [], invoices = [], purchases = [] } = useContext(BusinessRecordsContext);
   const { currency } = useContext(CurrencyContext);
   const { ads } = useContext(AppFeaturesContext);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -84,6 +92,7 @@ export default function HomeDashboard({ navigation }) {
   const shortcutColumns = contentWidth >= 640 ? 5 : contentWidth >= 420 ? 4 : 3;
   const shortcutWidth = `${(100 / shortcutColumns).toFixed(4)}%`;
   const { amounts: reportingAmounts, loading: reportingLoading, error: reportingError } = useReportingAmounts(transactions, currency?.code, "amount");
+  const hasBusinessActivity = [transactions, products, sales, orders, customers, suppliers, invoices, purchases].some((items) => items.length > 0);
   const today = transactions.filter((item) => inPeriod(item.timestamp, "daily"));
   const income = today
     .filter((item) => item.type === "income")
@@ -131,6 +140,19 @@ export default function HomeDashboard({ navigation }) {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
+        {!hasBusinessActivity && (
+          <Card style={styles.setupCard}>
+            <Card.Content>
+              <View style={styles.setupIcon}><MaterialCommunityIcons name="briefcase-check-outline" size={28} color="#2f7040" /></View>
+              <Text style={styles.setupTitle}>Welcome to FinanceTracker</Text>
+              <Text style={styles.setupText}>Bring your business records together in one place, from products and customers to sales, purchases, invoices and everyday transactions. Start with one step, then build your workspace as you go.</Text>
+              <View style={styles.setupStep}><Text style={styles.setupStepNumber}>1</Text><View style={styles.setupStepBody}><Text style={styles.setupStepTitle}>Set up what you sell</Text><Text style={styles.setupText}>Add products and prices to prepare for sales.</Text><Button compact mode="contained" onPress={() => navigation.navigate('PoSNavigator')}>Open Trade</Button></View></View>
+              <View style={styles.setupStep}><Text style={styles.setupStepNumber}>2</Text><View style={styles.setupStepBody}><Text style={styles.setupStepTitle}>Create a business contact</Text><Text style={styles.setupText}>Save a customer or supplier for your documents.</Text><View style={styles.setupActions}><Button compact onPress={() => navigation.navigate('Customers')}>Add customer</Button><Button compact onPress={() => navigation.navigate('Suppliers')}>Add supplier</Button></View></View></View>
+              <View style={styles.setupStep}><Text style={styles.setupStepNumber}>3</Text><View style={styles.setupStepBody}><Text style={styles.setupStepTitle}>Record your first activity</Text><Text style={styles.setupText}>Capture income or an expense, or create an invoice.</Text><View style={styles.setupActions}><Button compact onPress={() => navigation.navigate('Income')}>Income</Button><Button compact onPress={() => navigation.navigate('Expense')}>Expense</Button><Button compact onPress={() => navigation.navigate('Invoices')}>Invoice</Button></View></View></View>
+            </Card.Content>
+          </Card>
+        )}
+
         <Card style={styles.summaryCard}>
           <Card.Content>
             <Text style={styles.summaryTitle}>Today · {currency?.code || "UGX"}</Text>
@@ -293,20 +315,15 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 24,
   },
-  setupCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    marginBottom: 12,
-    elevation: 1,
-  },
-  setupTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#24432b",
-    marginBottom: 6,
-  },
+  setupCard: { backgroundColor: "#fff", borderRadius: 18, marginBottom: 14, elevation: 1 },
+  setupIcon: { width: 52, height: 52, borderRadius: 16, backgroundColor: "#e7f1e8", alignItems: "center", justifyContent: "center", marginBottom: 12 },
+  setupTitle: { fontSize: 19, fontWeight: "800", color: "#24432b", marginBottom: 6 },
   setupText: { fontSize: 13, color: "#536357", lineHeight: 19 },
-  setupActions: { flexDirection: "row", flexWrap: "wrap", marginTop: 8 },
+  setupActions: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", marginTop: 4 },
+  setupStep: { flexDirection: "row", alignItems: "flex-start", marginTop: 15, paddingTop: 13, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#dce5dc" },
+  setupStepNumber: { width: 28, height: 28, borderRadius: 14, overflow: "hidden", textAlign: "center", textAlignVertical: "center", backgroundColor: "#e7f1e8", color: "#2f7040", fontWeight: "800", paddingTop: 4, marginRight: 10 },
+  setupStepBody: { flex: 1, gap: 3 },
+  setupStepTitle: { fontSize: 14, fontWeight: "700", color: "#24432b" },
   summaryCard: {
     backgroundColor: "#fff",
     borderRadius: 18,

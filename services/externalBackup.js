@@ -72,10 +72,10 @@ export async function writeExternalBackup(uid) {
   try {
     const keys = (await AsyncStorage.getAllKeys()).filter((key) => (key.startsWith(`expenseTracker.${uid}.`) || key === `expenseTracker.currency.${uid}`) && !key.startsWith(`expenseTracker.externalBackup.${uid}.`));
     const data = Object.fromEntries(await AsyncStorage.multiGet(keys));
-    const snapshot = JSON.stringify({ format: 'ExpenseTracker backup', version: 1, updatedAt: new Date().toISOString(), data }, null, 2);
+    const snapshot = JSON.stringify({ format: 'FinanceTracker backup', version: 1, updatedAt: new Date().toISOString(), data }, null, 2);
     let backupUri = await AsyncStorage.getItem(fileKey(uid));
     if (!backupUri) {
-      backupUri = await StorageAccessFramework.createFileAsync(directoryUri, 'ExpenseTracker-backup.json', 'application/json');
+      backupUri = await StorageAccessFramework.createFileAsync(directoryUri, 'FinanceTracker-backup.json', 'application/json');
       await AsyncStorage.setItem(fileKey(uid), backupUri);
     }
     await writeAsStringAsync(backupUri, snapshot);

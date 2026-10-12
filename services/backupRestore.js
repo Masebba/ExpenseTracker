@@ -3,13 +3,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const scopedKey = (key, uid) => key.startsWith(`expenseTracker.${uid}.`) || key === `expenseTracker.currency.${uid}`;
 
 function collectEntries(uid, backup) {
-  if (backup?.version !== 1 || !['ExpenseTracker export', 'ExpenseTracker backup'].includes(backup?.format)) {
-    throw new Error('This is not a supported ExpenseTracker backup file.');
+  if (backup?.version !== 1 || !['FinanceTracker export', 'FinanceTracker backup', 'ExpenseTracker export', 'ExpenseTracker backup'].includes(backup?.format)) {
+    throw new Error('This is not a supported FinanceTracker backup file.');
   }
-  if (backup.format === 'ExpenseTracker export' && backup.uid !== uid) {
+  if (['FinanceTracker export', 'ExpenseTracker export'].includes(backup.format) && backup.uid !== uid) {
     throw new Error('This export belongs to a different account. Sign in to the matching account before restoring it.');
   }
-  const localData = backup.format === 'ExpenseTracker export' ? backup.localData : backup.data;
+  const localData = ['FinanceTracker export', 'ExpenseTracker export'].includes(backup.format) ? backup.localData : backup.data;
   if (!localData || typeof localData !== 'object' || Array.isArray(localData)) throw new Error('The backup does not contain valid local records.');
   const entries = Object.entries(localData);
   if (!entries.length) throw new Error('This backup contains no local records to restore.');
