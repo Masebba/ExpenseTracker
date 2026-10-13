@@ -28,7 +28,7 @@
     "@shopify/react-native-skia": "2.6.2",
     "expo": "~57.0.27",
     "expo-camera": "~57.0.6",
-    "expo-dev-client": "~57.0.19",
+    "expo-dev-client": "~57.0.20",
     "expo-document-picker": "~57.0.3",
     "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.4",
@@ -72,5 +72,8 @@
         "listUnknownPackages": false
       }
     }
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.6"
   }
 }

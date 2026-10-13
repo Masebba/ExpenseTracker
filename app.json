@@ -54,9 +54,9 @@
       "expo-sharing",
       "expo-document-picker"
     ],
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+
+    "runtimeVersion": "1.0.1",
+
     "updates": {
       "url": "https://u.expo.dev/e686eb7d-2e35-4e19-82e7-3d811f8a4cc1"
     }

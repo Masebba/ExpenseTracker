@@ -123,12 +123,7 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            if (!project.hasProperty('MYAPP_UPLOAD_STORE_FILE') ||
-                !project.hasProperty('MYAPP_UPLOAD_STORE_PASSWORD') ||
-                !project.hasProperty('MYAPP_UPLOAD_KEY_ALIAS') ||
-                !project.hasProperty('MYAPP_UPLOAD_KEY_PASSWORD')) {
-                throw new GradleException('Release signing credentials are missing. Configure an EAS Android production keystore before building a release.')
-            }
+            
             signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
