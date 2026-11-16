@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { AuthContext } from './AuthContext';
-import { makeId, nowIso, toInteger, toNumber } from './utils/appUtils';
+import { commitLocalJsonTransaction, makeId, nowIso, toInteger, toNumber } from './utils/appUtils';
 import usePersistedState from './utils/usePersistedState';
 import { deleteRecord, replaceCollection, subscribeToCollection, writeRecord } from './services/cloudSync';
 import { AppFeaturesContext } from './AppFeaturesContext';
@@ -9,14 +9,14 @@ import { CurrencyContext } from './CurrencyContext';
 export const ProductsContext = createContext();
 
 export const ProductsProvider = ({ children }) => {
-  const { user, activeWorkspace } = useContext(AuthContext);
+  const { user, activeWorkspace, storageRevision } = useContext(AuthContext);
   const { cloudSyncRevision, cloudSyncEnabled } = useContext(AppFeaturesContext);
   const { currency, detectedCurrency } = useContext(CurrencyContext);
   const scopeId = activeWorkspace?.id || 'personal';
   const storageKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}products` : 'expenseTracker.guest.products';
   const categoriesKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}productCategories` : 'expenseTracker.guest.productCategories';
-  const [products, setProducts, hydrated] = usePersistedState(storageKey, []);
-  const [categories, setCategories, categoriesHydrated] = usePersistedState(categoriesKey, ['General']);
+  const [products, setProducts, hydrated] = usePersistedState(storageKey, [], storageRevision);
+  const [categories, setCategories, categoriesHydrated] = usePersistedState(categoriesKey, ['General'], storageRevision);
   const syncTag = `${user?.uid || ''}:${scopeId}:${cloudSyncRevision}`;
   const [cloudLoadedFor, setCloudLoadedFor] = useState('');
   const cloudLoaded = cloudLoadedFor === syncTag;
@@ -69,7 +69,7 @@ export const ProductsProvider = ({ children }) => {
     if (stock < 0) throw new Error('Stock cannot be negative.');
     const product = { id: data.id || makeId('prod'), barcode: String(data.barcode || '').trim(), name: data.name.trim(), price: Math.round(price * 100) / 100, buyingPrice: Math.round(buyingPrice * 100) / 100, stock, category: String(data.category || 'General').trim() || 'General', currencyCode: data.currencyCode || currency?.code || detectedCurrency?.code || 'UGX', createdAt: nowIso(), updatedAt: nowIso() };
     await save(product);
-    setProducts((current) => [...current, product]);
+    if (!await setProducts((current) => [...current, product])) throw new Error('Product could not be saved to this device. Check storage and try again.');
     return product;
   }, [save, setProducts, currency?.code, detectedCurrency?.code]);
 
@@ -79,12 +79,12 @@ export const ProductsProvider = ({ children }) => {
     const record = { ...current, ...data, price: data.price === undefined ? current.price : toNumber(data.price, current.price), buyingPrice: data.buyingPrice === undefined ? current.buyingPrice : toNumber(data.buyingPrice, current.buyingPrice), stock: data.stock === undefined ? current.stock : toInteger(data.stock, current.stock), updatedAt: nowIso() };
     if (!Number.isInteger(record.stock) || record.stock < 0 || !Number.isFinite(record.price) || record.price <= 0 || !Number.isFinite(record.buyingPrice) || record.buyingPrice < 0) throw new Error('Product stock and prices are invalid.');
     await save(record);
-    setProducts((items) => items.map((item) => item.id === id ? record : item));
+    if (!await setProducts((items) => items.map((item) => item.id === id ? record : item))) throw new Error('Product changes could not be saved to this device.');
   }, [save, setProducts]);
 
   const deleteProduct = useCallback(async (id) => {
     if (user?.uid) await deleteRecord(user.uid, 'products', id, scopeId);
-    setProducts((current) => current.filter((p) => p.id !== id));
+    if (!await setProducts((current) => current.filter((p) => p.id !== id))) throw new Error('Product deletion could not be saved to this device.');
   }, [setProducts, user?.uid, scopeId]);
 
   const adjustStock = useCallback(async (id, delta, reason = 'manual') => {
@@ -95,46 +95,63 @@ export const ProductsProvider = ({ children }) => {
     if (nextStock < 0) throw new Error(`Insufficient stock for ${current.name}.`);
     const updated = { ...current, stock: nextStock, updatedAt: nowIso(), lastStockAdjustment: { amount, reason, timestamp: nowIso() } };
     await save(updated);
-    setProducts((items) => items.map((item) => item.id === id ? updated : item));
+    if (!await setProducts((items) => items.map((item) => item.id === id ? updated : item))) throw new Error('Stock adjustment could not be saved to this device.');
     return updated;
   }, [save, setProducts]);
 
-  const addCategory = useCallback((name) => {
+  const addCategory = useCallback(async (name) => {
     const clean = String(name || '').trim();
     if (!clean) return;
-    setCategories((current) => current.includes(clean)
-      ? current
-      : ['General', ...new Set([...current, clean].filter((category) => category !== 'General'))]);
-    if (user?.uid) writeRecord(user.uid, 'productCategories', { id: clean.toLowerCase().replace(/[^a-z0-9]+/g, '_'), name: clean }, scopeId).catch(() => {});
-  }, [setCategories, user?.uid, scopeId]);
+    const next = await (async () => {
+      const current = categories.includes(clean) ? categories : ['General', ...new Set([...categories, clean].filter((category) => category !== 'General'))];
+      if (!await setCategories(current)) throw new Error('Product category could not be saved to this device.');
+      return current;
+    })();
+    if (user?.uid) await writeRecord(user.uid, 'productCategories', { id: clean.toLowerCase().replace(/[^a-z0-9]+/g, '_'), name: clean }, scopeId);
+    return next;
+  }, [categories, setCategories, user?.uid, scopeId]);
 
-  const updateCategory = useCallback((oldName, newName) => {
+  const updateCategory = useCallback(async (oldName, newName) => {
     const clean = String(newName || '').trim();
-    if (!clean) return;
-    setCategories((current) => ['General', ...new Set(
-      current.map((category) => category === oldName ? clean : category)
+    if (!clean || clean === oldName) return;
+    const nextCategories = ['General', ...new Set(
+      categories.map((category) => category === oldName ? clean : category)
         .map((category) => String(category || '').trim())
         .filter((category) => category && category !== 'General'),
-    )]);
-    setProducts((current) => current.map((p) => p.category === oldName ? { ...p, category: clean, updatedAt: nowIso() } : p));
-    products.filter((p) => p.category === oldName).forEach((p) => save({ ...p, category: clean, updatedAt: nowIso() }));
-  }, [products, save, setCategories, setProducts]);
+    )];
+    const nextProducts = products.map((product) => product.category === oldName ? { ...product, category: clean, updatedAt: nowIso() } : product);
+    await commitLocalJsonTransaction(user?.uid || 'guest', [
+      { key: categoriesKey, value: nextCategories },
+      { key: storageKey, value: nextProducts },
+    ]);
+    await setCategories(nextCategories, { skipPersist: true });
+    await setProducts(nextProducts, { skipPersist: true });
+    if (user?.uid) await Promise.all(nextProducts.filter((product) => product.category === clean).map((product) => writeRecord(user.uid, 'products', product, scopeId)));
+  }, [categories, products, categoriesKey, storageKey, user?.uid, scopeId, setCategories, setProducts]);
 
-  const deleteCategory = useCallback((name) => {
-    setCategories((current) => current.filter((c) => c !== name));
-    setProducts((current) => current.map((p) => p.category === name ? { ...p, category: 'General', updatedAt: nowIso() } : p));
-    products.filter((p) => p.category === name).forEach((p) => save({ ...p, category: 'General', updatedAt: nowIso() }));
-  }, [products, save, setCategories, setProducts]);
+  const deleteCategory = useCallback(async (name) => {
+    const nextCategories = categories.filter((category) => category !== name);
+    const nextProducts = products.map((product) => product.category === name ? { ...product, category: 'General', updatedAt: nowIso() } : product);
+    await commitLocalJsonTransaction(user?.uid || 'guest', [
+      { key: categoriesKey, value: nextCategories },
+      { key: storageKey, value: nextProducts },
+    ]);
+    await setCategories(nextCategories, { skipPersist: true });
+    await setProducts(nextProducts, { skipPersist: true });
+    if (user?.uid) await Promise.all(nextProducts.filter((product) => product.category === 'General').map((product) => writeRecord(user.uid, 'products', product, scopeId)));
+  }, [categories, products, categoriesKey, storageKey, user?.uid, scopeId, setCategories, setProducts]);
 
-  const setProductsSafe = useCallback(async (updater) => {
+  const setProductsSafe = useCallback(async (updater, options = {}) => {
     const next = typeof updater === 'function' ? updater(products) : updater;
     const previousIds = new Set(products.map((p) => p.id));
-    if (user?.uid) {
+    if (user?.uid && options?.skipCloudSync !== true) {
       await Promise.all(next.map((p) => writeRecord(user.uid, 'products', p, scopeId)));
       await Promise.all(products.filter((p) => !next.some((item) => item.id === p.id)).map((p) => deleteRecord(user.uid, 'products', p.id, scopeId)));
     }
     next.forEach((p) => previousIds.delete(p.id));
-    setProducts(next);
+    const localSaved = await setProducts(next, { skipPersist: options?.skipPersist === true });
+    if (!localSaved) throw new Error('Inventory could not be saved to this device.');
+    return true;
   }, [products, setProducts, user?.uid, scopeId]);
 
   const value = useMemo(() => ({ products, setProducts: setProductsSafe, addProduct, updateProduct, deleteProduct, adjustStock, categories, addCategory, updateCategory, deleteCategory, hydrated, categoriesHydrated, cloudLoaded }), [products, setProductsSafe, addProduct, updateProduct, deleteProduct, adjustStock, categories, addCategory, updateCategory, deleteCategory, hydrated, categoriesHydrated, cloudLoaded]);

@@ -29,6 +29,10 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# private cloud service-account credentials
+*service-account*.json
+*-service-account*.json
+
 # local env files
 .env
 .env*.local

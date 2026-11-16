@@ -6,8 +6,10 @@ import { TransactionsContext } from '../TransactionsContext';
 import { CurrencyContext } from '../CurrencyContext';
 import { formatMoney, inPeriod } from '../utils/appUtils';
 import useReportingAmounts from '../hooks/useReportingAmounts';
+import { ThemeContext } from '../ThemeContext';
 
 export default function MyAccountScreen() {
+    const { palette } = useContext(ThemeContext);
     const { transactions } = useContext(TransactionsContext);
     const [filter, setFilter] = useState('daily');
     const now = new Date();
@@ -26,13 +28,13 @@ export default function MyAccountScreen() {
 
     // Calculate net total (income minus expense)
     const netTotal = incomeTotal - expenseTotal;
-    const totalStyle = netTotal >= 0 ? styles.totalPositive : styles.totalNegative;
+    const totalStyle = { color: netTotal >= 0 ? palette.income : palette.expense };
 
     return (
-        <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-            <Title style={styles.title}>Account summary</Title>
-            <Text style={styles.period}>Your cash flow · {filter === 'all' ? 'All time' : ({daily:'Today',weekly:'This week',monthly:'This month',yearly:'This year'}[filter])} · {currency?.code || 'UGX'}</Text>
-            {!!reportingError && <Text style={styles.period}>{reportingError}</Text>}
+        <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}><ScrollView contentContainerStyle={[styles.container, { backgroundColor: palette.background }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+            <Title style={[styles.title, { color: palette.text }]}>Account summary</Title>
+            <Text style={[styles.period, { color: palette.textMuted }]}>Your cash flow · {filter === 'all' ? 'All time' : ({daily:'Today',weekly:'This week',monthly:'This month',yearly:'This year'}[filter])} · {currency?.code || 'UGX'}</Text>
+            {!!reportingError && <Text style={[styles.period, { color: palette.textMuted }]}>{reportingError}</Text>}
 
             {/* Filter Buttons Container */}
             <View style={styles.filterContainer}>
@@ -57,16 +59,16 @@ export default function MyAccountScreen() {
                 </Button>
             </View>
 
-            <View style={styles.summaryCard}>
-                <Text style={styles.label}>Income</Text><Text style={[styles.summary, styles.income]}>{reportingLoading || reportingError ? '—' : formatMoney(incomeTotal, currency)}</Text>
+            <View style={[styles.summaryCard, { backgroundColor: palette.surface, borderLeftColor: palette.primary }]}>
+                <Text style={[styles.label, { color: palette.textMuted }]}>Income</Text><Text style={[styles.summary, styles.income]}>{reportingLoading || reportingError ? '—' : formatMoney(incomeTotal, currency)}</Text>
             </View>
-            <View style={styles.summaryCard}>
-                <Text style={styles.label}>Expenses</Text><Text style={[styles.summary, styles.expense]}>{reportingLoading || reportingError ? '—' : formatMoney(expenseTotal, currency)}</Text>
+            <View style={[styles.summaryCard, { backgroundColor: palette.surface, borderLeftColor: palette.primary }]}>
+                <Text style={[styles.label, { color: palette.textMuted }]}>Expenses</Text><Text style={[styles.summary, styles.expense]}>{reportingLoading || reportingError ? '—' : formatMoney(expenseTotal, currency)}</Text>
             </View>
-            <View style={styles.summaryCard}>
-                <Text style={styles.label}>Net total</Text><Text style={[styles.summary, totalStyle]}>{reportingLoading || reportingError ? '—' : formatMoney(netTotal, currency)}</Text>
+            <View style={[styles.summaryCard, { backgroundColor: palette.surface, borderLeftColor: palette.primary }]}>
+                <Text style={[styles.label, { color: palette.textMuted }]}>Net total</Text><Text style={[styles.summary, totalStyle]}>{reportingLoading || reportingError ? '—' : formatMoney(netTotal, currency)}</Text>
             </View>
-            <View style={styles.insight}><Text style={styles.insightTitle}>Cash flow</Text><Text style={styles.insightText}>{netTotal >= 0 ? 'Income is ahead of expenses' : 'Expenses are ahead of income'} by {formatMoney(Math.abs(netTotal), currency)} for this period.</Text></View>
+            <View style={[styles.insight, { backgroundColor: palette.surfaceAlt }]}><Text style={[styles.insightTitle, { color: palette.text }]}>Cash flow</Text><Text style={[styles.insightText, { color: palette.textMuted }]}>{netTotal >= 0 ? 'Income is ahead of expenses' : 'Expenses are ahead of income'} by {formatMoney(Math.abs(netTotal), currency)} for this period.</Text></View>
         </ScrollView></KeyboardAvoidingView>
     );
 }

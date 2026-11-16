@@ -55,15 +55,9 @@ firebase deploy --only firestore:indexes
 
 Wait for the `invitations` collection-group index on `email` and `status` to show as enabled in Firebase Console > Firestore > Indexes. Confirm that the active Firebase project is the correct production project before deploying anything.
 
-### C. Verify Firebase Storage
+### C. Advertisement image hosting
 
-The bundled logs previously showed `storage/bucket-not-found`. In Firebase Console, confirm that Storage is initialized and that the bucket name matches `EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET` exactly. Confirm billing/plan eligibility for the Storage features you use, then review and deploy `storage.rules` only after checking them against your real user data and intended access model:
-
-```bash
-firebase deploy --only storage
-```
-
-Do not just suppress the missing-bucket error. Profile, organization and advertisement upload flows should be tested after Storage is correctly configured.
+The current advert form stores a public HTTPS image URL, it does not upload image bytes to Firebase Storage. Use a direct image-file URL from a host that allows public image delivery. A webpage URL, private share link, expired signed URL, or authenticated-only image will not render. Firebase Storage setup is only necessary if a future release implements in-app media upload with a secure access policy.
 
 ### D. Deploy and test account deletion
 
@@ -100,8 +94,8 @@ When changing native dependencies or native configuration, build a new native bi
 - Replace the placeholders in `PRIVACY_POLICY.md`, publish it at a stable public URL, and use that URL in the Play listing.
 - Ensure privacy wording matches actual behaviour, especially local-only ledger records, cloud-stored workspace administration data, analytics/adverts, currency formatting, and account deletion.
 - Complete Google Play Data safety, financial features, target audience, content rating, app access and advertising declarations based on the real production app.
-- Review Firestore rules, Storage rules, Firebase usage alerts/billing, backups, error monitoring and a support contact.
-- Complete physical-device tests for sign-in/signup/password reset, offline mode, workspace membership/invitations, data export/import, currency conversion, storage uploads, account deletion, app upgrade and cold launch.
+- Review Firestore rules/indexes, Firebase usage alerts/billing, backups, error monitoring and a support contact. Deploy the callable workspace ownership/deletion functions with `firebase deploy --only functions`.
+- Complete physical-device tests for sign-in/signup/password reset, offline mode, workspace membership/invitations, data export/import, currency conversion, public HTTPS advert image URLs, account/workspace deletion, app upgrade and cold launch.
 
 ## Important known limitation
 
@@ -131,3 +125,35 @@ These UX items are recommendations for a separate UI iteration, not claims that 
 - New backup files use the FinanceTracker label; the restore parser continues accepting legacy ExpenseTracker backup formats. Local storage keys and private image directories remain unchanged to preserve existing data.
 
 These are source/configuration changes. Rebuild and test on a physical Android device before release. No Firebase deployment or EAS artifact build was performed as part of this UX pass.
+
+
+## FinanceTracker hardening update (13 October 2026)
+
+### Organisation member query index
+
+`services/organizations.js` uses a collection-group query on `memberships` filtered by `organizationId`. The index file defines `COLLECTION_GROUP` ascending indexes for `organizationId` and `status`, in addition to the invitations composite index. Set the correct `EXPO_PUBLIC_FIREBASE_PROJECT_ID` in `.env`, authenticate the Firebase CLI with an account that has deploy permission, and run this from the project root:
+
+```bash
+npm run deploy:firestore-indexes
+```
+
+Index deployment is a Firebase project action and must be run by an account with permission to deploy indexes. The script prints the project ID before deploying; verify it is the same project configured in the app. Allow time for the index to finish building, then retry loading members. Do not change Firestore security rules to public access to work around an index error. The ZIP cannot deploy or confirm the live index without Firebase authentication and project access.
+
+### Advert image requirements
+
+The app stores an advert image URL in Firestore and renders it with React Native `Image`; it does not upload advert image bytes. A URL must be HTTPS, point directly to a public image file, and allow unauthenticated image reads. A webpage URL, private file share link, expired signed URL, missing Firebase Storage bucket, or Storage object without a valid download URL will not render. Developer Studio now requires the preview to load before publishing an advert with an image. For dependable uploads, configure a public image host such as Cloudinary or Supabase Storage and implement its upload credentials/policy before claiming that in-app image uploads are supported. Do not put private upload secrets in `EXPO_PUBLIC_*` variables.
+
+### Regional defaults
+
+Region detection now checks the device time zone before locale, so `Africa/Nairobi` resolves to Kenya/KES even when the language setting remains English-Uganda. Date/time formatting still relies on the device locale/time zone. This does not independently verify physical GPS location: if a user manually keeps a different time zone and locale, country detection can still be wrong. GPS-based country detection requires an installed location module, user permission, and reverse-geocoding implementation. Currency explicitly chosen by the user is retained; otherwise the default follows the detected region.
+
+### Data management facts
+
+- AsyncStorage is the primary local data store; a private app-document-directory JSON mirror is a recovery fallback, not a user-visible folder or a separate backup.
+- A user-selected Android document-provider folder receives a JSON backup; it is not cloud ledger sync. Automatic updates are scheduled after local JSON writes. Restore validates the backup scope, attempts rollback on failure, and now schedules a refreshed external backup after a successful restore.
+- Cloud ledger sync remains release-blocked. Account profiles, organisation metadata/memberships/invitations, and developer adverts are separate Firestore data. The app must not describe workspace records as synced between devices.
+- Removing the app or clearing its data may delete app-private records. Export a backup or connect an external folder before changing devices or reinstalling.
+
+### Startup and error messages
+
+Auth initialization now displays the FinanceTracker logo and a loading message instead of rendering an empty view. Customer-facing error translation hides Firebase/Firestore/index implementation details; technical diagnostics are intended for developer logs only.

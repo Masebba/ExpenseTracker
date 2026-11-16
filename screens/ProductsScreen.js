@@ -1,3 +1,4 @@
+import { userFacingError } from '../utils/userFacingErrors';
 // screens/ProductsScreen.js
 import React, { useState, useContext } from 'react';
 import { View, StyleSheet, FlatList, Alert, TouchableOpacity } from 'react-native';
@@ -6,11 +7,15 @@ import BarcodeScannerComponent from '../BarcodeScannerComponent';
 import { ProductsContext } from '../ProductsContext'; // Global context for products
 import { CurrencyContext } from '../CurrencyContext';
 import { formatMoney } from '../utils/appUtils';
+import CompactFilterMenu from '../components/CompactFilterMenu';
+import CompactSearch from '../components/CompactSearch';
+import { ThemeContext } from '../ThemeContext';
 
 export default function ProductsScreen() {
     // If using a global context, get products and updater from it.
     // For a local version, you can continue using local state.
     const { products, setProducts, categories: categoriesList, addCategory, updateCategory, deleteCategory } = useContext(ProductsContext);
+    const { palette, isDark } = useContext(ThemeContext);
 
     const { currency, detectedCurrency } = useContext(CurrencyContext);
     // Local state for adding/editing product
@@ -25,7 +30,7 @@ export default function ProductsScreen() {
     const [newCategoryInput, setNewCategoryInput] = useState('');
     const [categoryModalVisible, setCategoryModalVisible] = useState(false);
     const [search, setSearch] = useState('');
-    const [categoryFilter, setCategoryFilter] = useState('All');
+    const [categoryFilter, setCategoryFilter] = useState('__all__');
 
     // Modal visibility for product add/edit and barcode scanning
     const [productModalVisible, setProductModalVisible] = useState(false);
@@ -68,21 +73,21 @@ export default function ProductsScreen() {
         }
         resetForm();
         setProductModalVisible(false);
-        } catch (error) { Alert.alert('Could not save product', error.message || 'Try again.'); }
+        } catch (error) { Alert.alert('Could not save product', userFacingError(error, 'Please try again.')); }
     };
 
     const handleDelete = (id) => {
         const product = products.find((p) => p.id === id);
-        Alert.alert('Delete product', `Delete ${product?.name || 'this product'}? Historical sales are retained.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => setProducts(products.filter(prod => prod.id !== id)).catch((error) => Alert.alert('Could not delete product', error.message)) }]);
+        Alert.alert('Delete product', `Delete ${product?.name || 'this product'}? Historical sales are retained.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => setProducts(products.filter(prod => prod.id !== id)).catch((error) => Alert.alert('Could not delete product', userFacingError(error, 'Please try again.'))) }]);
     };
 
     const renderProduct = ({ item }) => (
-        <Card style={styles.card}>
+        <Card style={[styles.card, { backgroundColor: palette.surface }]} >
             <Card.Content>
                 <View style={styles.productRow}>
                     <View style={styles.productDetails}>
                         <Text style={styles.productName}>{item.name}</Text>
-                        <Text>Barcode: {item.barcode}</Text>
+                        <Text>Barcode: {item.barcode || 'Not assigned'}</Text>
                         <Text>Selling Price: {formatMoney(item.price, { code: item.currencyCode || detectedCurrency?.code || currency?.code })}</Text>
                         <Text>Buying Price: {formatMoney(item.buyingPrice, { code: item.currencyCode || detectedCurrency?.code || currency?.code })}</Text>
                         <Text>Stock: {item.stock}</Text>
@@ -166,7 +171,7 @@ export default function ProductsScreen() {
                     label="New Category"
                     value={newCategoryInput}
                     onChangeText={setNewCategoryInput}
-                    style={styles.input}
+                    style={[styles.input, { backgroundColor: palette.input }]}
                 />
                 <Button
                     mode="contained"
@@ -194,7 +199,7 @@ export default function ProductsScreen() {
                 <Modal
                     visible={productModalVisible}
                     onDismiss={() => { setProductModalVisible(false); resetForm(); }}
-                    contentContainerStyle={styles.modal}
+                    contentContainerStyle={[styles.modal, { backgroundColor: palette.surface }]}
                 >
                     <Title>{editingProduct ? 'Edit Product' : 'Add Product'}</Title>
                     <View style={styles.row}>
@@ -247,7 +252,7 @@ export default function ProductsScreen() {
                         value={buyingPrice}
                         onChangeText={setBuyingPrice}
                         keyboardType="numeric"
-                        style={styles.input}
+                        style={[styles.input, { backgroundColor: palette.input }]}
                     />
                     <Button mode="contained" onPress={handleAddOrEdit} style={styles.button}>
                         {editingProduct ? 'Update Product' : 'Add Product'}
@@ -277,24 +282,24 @@ export default function ProductsScreen() {
     );
 
     return (
-        <View style={styles.container}>
-            <Title>Products & Inventory</Title>
-            <Button
-                mode="contained"
-                onPress={() => setProductModalVisible(true)}
-                style={styles.button}
-            >
-                {editingProduct ? 'Edit Product' : 'Add Product'}
-            </Button>
+        <View style={[styles.container, { backgroundColor: palette.background }]} >
+            <View style={styles.headingRow}><Title style={styles.pageTitle}>Products & Inventory</Title><Text style={[styles.countText, { color: palette.textMuted }]} >{products.length} products</Text></View>
+            <View style={styles.toolbar}>
+                <Button compact icon="plus" mode="contained" onPress={() => { resetForm(); setProductModalVisible(true); }} style={styles.addButton}>Add product</Button>
+                <CompactFilterMenu value={categoryFilter} label="Category" onChange={setCategoryFilter} options={[{ value: '__all__', label: 'All categories' }, ...categoriesList.map((cat) => ({ value: cat, label: cat }))]} />
+                <CompactSearch value={search} onChangeText={setSearch} placeholder="Product, barcode or category" accessibilityLabel="Search products" />
+            </View>
             {renderCategoryModal()}
             {renderProductModal()}
             {renderScannerModal()}
-            <TextInput label="Search products or barcodes" value={search} onChangeText={setSearch} style={styles.input} />
-            <View style={styles.filters}><Button compact mode={categoryFilter === 'All' ? 'contained' : 'outlined'} onPress={() => setCategoryFilter('All')}>All</Button>{categoriesList.map((cat) => <Button compact key={cat} mode={categoryFilter === cat ? 'contained' : 'outlined'} onPress={() => setCategoryFilter(cat)}>{cat}</Button>)}</View>
             <FlatList
-                data={products.filter((product) => (categoryFilter === 'All' || product.category === categoryFilter) && `${product.name} ${product.barcode || ''} ${product.category || ''}`.toLowerCase().includes(search.trim().toLowerCase()))}
+                data={products.filter((product) => (categoryFilter === '__all__' || product.category === categoryFilter) && `${product.name} ${product.barcode || ''} ${product.category || ''}`.toLowerCase().includes(search.trim().toLowerCase()))}
                 keyExtractor={(item) => item.id}
                 renderItem={renderProduct}
+                style={styles.productsList}
+                contentContainerStyle={styles.productsContent}
+                keyboardShouldPersistTaps="handled"
+                ListEmptyComponent={<Text style={[styles.empty, { color: palette.textMuted }]} >No products match this filter. Add a product, even if it has no barcode.</Text>}
             />
         </View>
     );
@@ -302,8 +307,16 @@ export default function ProductsScreen() {
 
 const styles = StyleSheet.create({
     container: {
-        flex: 1, paddingHorizontal: 18, paddingTop: 22, paddingBottom: 112, backgroundColor: '#f4f6f3'
+        flex: 1, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2, backgroundColor: '#f4f6f3'
     },
+    headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+    pageTitle: { fontSize: 21, color: '#24432b' },
+    countText: { fontSize: 12, color: '#66756a' },
+    toolbar: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 5 },
+    addButton: { borderRadius: 18, flexShrink: 1 },
+    productsList: { flex: 1 },
+    productsContent: { paddingBottom: 8 },
+    empty: { color: '#68776c', textAlign: 'center', marginTop: 35, paddingHorizontal: 22, lineHeight: 20 },
     row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
     input: { marginBottom: 10, backgroundColor: '#fff', borderRadius: 14 },
     halfInput: { width: '48%' },
@@ -321,7 +334,6 @@ const styles = StyleSheet.create({
     productRow: { flexDirection: 'row', justifyContent: 'space-between' },
     productDetails: { flex: 1 },
     productActions: { justifyContent: 'center' },
-    filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, marginBottom: 7 },
     productName: { fontWeight: 'bold', marginBottom: 2 },
     categoryButton: {
         justifyContent: 'center',

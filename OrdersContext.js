@@ -11,12 +11,12 @@ import { currencyFromCode } from './utils/appUtils';
 export const OrdersContext = createContext();
 
 export const OrdersProvider = ({ children }) => {
-  const { user, activeWorkspace } = useContext(AuthContext);
+  const { user, activeWorkspace, storageRevision } = useContext(AuthContext);
   const { currency, detectedCurrency } = useContext(CurrencyContext);
   const { cloudSyncRevision, cloudSyncEnabled } = useContext(AppFeaturesContext);
   const scopeId = activeWorkspace?.id || 'personal';
   const storageKey = user ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}orders` : 'expenseTracker.guest.orders';
-  const [orders, setOrders, hydrated] = usePersistedState(storageKey, []);
+  const [orders, setOrders, hydrated] = usePersistedState(storageKey, [], storageRevision);
   const syncTag = `${user?.uid || ''}:${scopeId}:${cloudSyncRevision}`;
   const [cloudLoadedFor, setCloudLoadedFor] = React.useState('');
   const cloudLoaded = cloudLoadedFor === syncTag;
@@ -38,9 +38,9 @@ export const OrdersProvider = ({ children }) => {
     if (!Number.isFinite(total) || total <= 0) throw new Error('Order total must be greater than zero.');
     const currencyCode = String(data.currencyCode || currency?.code || detectedCurrency?.code || 'UGX').toUpperCase();
     const conversion = await convertAmount(total, currencyCode, currency?.code || 'UGX');
-    const order = { id: makeId('order'), customerName: data.customerName.trim(), customerPhone: String(data.customerPhone || '').trim(), productName: data.productName.trim(), total: Math.round(total * 100) / 100, currencyCode, currency: currencyCode, currencySymbol: currencyFromCode(currencyCode).symbol, baseAmount: Math.round(conversion.amount * 1000000) / 1000000, baseCurrencyCode: currency?.code || 'UGX', exchangeRate: conversion.rate, exchangeRateTimestamp: conversion.timestamp, status: 'Pending', installments: [], createdAt: nowIso(), updatedAt: nowIso() };
+    const order = { id: makeId('order'), customerName: data.customerName.trim(), customerPhone: String(data.customerPhone || '').trim(), productName: data.productName.trim(), total: Math.round(total * 100) / 100, currencyCode, currency: currencyCode, currencySymbol: currencyFromCode(currencyCode).symbol, baseAmount: Math.round(conversion.amount * 1000000) / 1000000, baseCurrencyCode: currency?.code || 'UGX', exchangeRate: conversion.rate, exchangeRateTimestamp: conversion.timestamp, exchangeRateStale: conversion.isStale === true, status: 'Pending', installments: [], createdAt: nowIso(), updatedAt: nowIso() };
+    if (!await setOrders((current) => [...current, order])) throw new Error('Order could not be saved to this device.');
     await writeRecord(user?.uid, 'orders', order, scopeId);
-    setOrders((current) => [...current, order]);
     return order;
   }, [setOrders, user?.uid, scopeId, currency?.code, detectedCurrency?.code]);
 
@@ -58,14 +58,15 @@ export const OrdersProvider = ({ children }) => {
       updated.baseCurrencyCode = currency?.code || 'UGX';
       updated.exchangeRate = conversion.rate;
       updated.exchangeRateTimestamp = conversion.timestamp;
+      updated.exchangeRateStale = conversion.isStale === true;
     }
+    if (!await setOrders((items) => items.map((x) => x.id === id ? updated : x))) throw new Error('Order changes could not be saved to this device.');
     await writeRecord(user?.uid, 'orders', updated, scopeId);
-    setOrders((items) => items.map((x) => x.id === id ? updated : x));
   }, [orders, setOrders, user?.uid, scopeId, currency?.code, detectedCurrency?.code]);
 
   const deleteOrder = useCallback(async (id) => {
+    if (!await setOrders((current) => current.filter((x) => x.id !== id))) throw new Error('Order deletion could not be saved to this device.');
     if (user?.uid) await deleteRecord(user.uid, 'orders', id, scopeId);
-    setOrders((current) => current.filter((x) => x.id !== id));
   }, [setOrders, user?.uid, scopeId]);
 
   const addInstallment = useCallback(async (id, amount) => {
@@ -78,20 +79,23 @@ export const OrdersProvider = ({ children }) => {
     if (value > remaining) throw new Error(`Installment cannot exceed the remaining balance of ${formatMoney(remaining, currencyFromCode(current.currencyCode || currency?.code))}.`);
     const transactionCurrencyCode = current.currencyCode || detectedCurrency?.code || currency?.code || 'UGX';
     const conversion = await convertAmount(value, transactionCurrencyCode, currency?.code || 'UGX');
-    const installment = { id: makeId('inst'), amount: Math.round(value * 100) / 100, currencyCode: transactionCurrencyCode, currencySymbol: currencyFromCode(transactionCurrencyCode).symbol, baseAmount: Math.round(conversion.amount * 1000000) / 1000000, baseCurrencyCode: currency?.code || 'UGX', exchangeRate: conversion.rate, exchangeRateTimestamp: conversion.timestamp, date: nowIso() };
+    const installment = { id: makeId('inst'), amount: Math.round(value * 100) / 100, currencyCode: transactionCurrencyCode, currencySymbol: currencyFromCode(transactionCurrencyCode).symbol, baseAmount: Math.round(conversion.amount * 1000000) / 1000000, baseCurrencyCode: currency?.code || 'UGX', exchangeRate: conversion.rate, exchangeRateTimestamp: conversion.timestamp, exchangeRateStale: conversion.isStale === true, date: nowIso() };
     const updated = { ...current, installments: [...(current.installments || []), installment], status: paid + value >= current.total ? 'Completed' : 'Pending', updatedAt: nowIso() };
+    if (!await setOrders((list) => list.map((x) => x.id === id ? updated : x))) throw new Error('Order payment could not be saved to this device.');
     await writeRecord(user?.uid, 'orders', updated, scopeId);
-    setOrders((list) => list.map((x) => x.id === id ? updated : x));
     return installment;
   }, [orders, setOrders, user?.uid, scopeId, currency?.code, detectedCurrency?.code]);
 
-  const setOrdersSafe = useCallback((updater) => {
+  const setOrdersSafe = useCallback(async (updater) => {
     const next = typeof updater === 'function' ? updater(orders) : updater;
+    if (!Array.isArray(next)) throw new Error('Orders must be saved as a list.');
     const previousIds = new Set(orders.map((x) => x.id));
-    setOrders(next);
+    if (!await setOrders(next)) throw new Error('Orders could not be saved to this device.');
     if (user?.uid) {
-      next.forEach((x) => { writeRecord(user.uid, 'orders', x, scopeId).catch(() => {}); previousIds.delete(x.id); });
-      previousIds.forEach((id) => deleteRecord(user.uid, 'orders', id, scopeId).catch(() => {}));
+      const writes = next.map((record) => writeRecord(user.uid, 'orders', record, scopeId));
+      next.forEach((record) => previousIds.delete(record.id));
+      await Promise.all(writes);
+      await Promise.all([...previousIds].map((id) => deleteRecord(user.uid, 'orders', id, scopeId)));
     }
   }, [orders, setOrders, user?.uid, scopeId]);
   const value = useMemo(() => ({ orders, setOrders: setOrdersSafe, addOrder, updateOrder, deleteOrder, addInstallment, hydrated }), [orders, setOrdersSafe, addOrder, updateOrder, deleteOrder, addInstallment, hydrated]);

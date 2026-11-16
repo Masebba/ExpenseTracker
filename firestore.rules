@@ -21,12 +21,28 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isUser(userId);
-      allow create: if isUser(userId) && !('developerAdmin' in request.resource.data);
+      allow create: if isUser(userId)
+        && request.resource.data.uid == userId
+        && !('developerAdmin' in request.resource.data);
       allow update: if isUser(userId)
+        && request.resource.data.uid == userId
+        && (!('uid' in resource.data) || request.resource.data.uid == resource.data.uid)
+        && (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['developerAdmin']);
-      allow delete: if isUser(userId);
+      // Account profiles are never client-deletable. Account deletion uses a
+      // recent-authenticated callable function that performs complete cleanup.
+      allow delete: if false;
       match /{collectionName}/{document=**} {
-        allow read, write: if collectionName != 'memberships' && isUser(userId);
+        function isLedgerCollection() {
+          return collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories', 'customers', 'suppliers', 'invoices', 'purchases'];
+        }
+        allow read: if collectionName != 'memberships' && isUser(userId);
+        allow create: if collectionName != 'memberships' && isUser(userId)
+          && (!isLedgerCollection() || request.resource.data.createdBy == request.auth.uid);
+        allow update: if collectionName != 'memberships' && isUser(userId)
+          && (!isLedgerCollection() || request.resource.data.createdBy == request.auth.uid
+            && (!('createdBy' in resource.data) || request.resource.data.createdBy == resource.data.createdBy));
+        allow delete: if collectionName != 'memberships' && isUser(userId);
       }
       match /memberships/{orgId} {
         allow read: if isUser(userId) || (signedIn() && hasMembership(orgId));
@@ -34,7 +50,7 @@ service cloud.firestore {
           && request.resource.data.role in ['owner', 'admin', 'editor', 'viewer']
           && request.resource.data.organizationId == orgId
           && (isUser(userId)
-            ? ((request.resource.data.role == 'owner' && request.resource.data.email == request.auth.token.email.lower() && get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == userId)
+            ? ((request.resource.data.role == 'owner' && request.resource.data.email == request.auth.token.email.lower() && getAfter(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == userId)
               || (request.resource.data.email == request.auth.token.email.lower()
               && exists(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email.lower()))
               && get(/databases/$(database)/documents/organizations/$(orgId)/invitations/$(request.auth.token.email.lower())).data.status == 'pending'
@@ -64,7 +80,10 @@ service cloud.firestore {
       allow create: if canEdit(orgId)
           && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories', 'customers', 'suppliers', 'invoices', 'purchases']
           && request.resource.data.createdBy == request.auth.uid;
-        allow update: if canEdit(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories', 'customers', 'suppliers', 'invoices', 'purchases'];
+        allow update: if canEdit(orgId)
+          && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories', 'customers', 'suppliers', 'invoices', 'purchases']
+          && (!('createdBy' in resource.data) || request.resource.data.createdBy == resource.data.createdBy)
+          && (!('organizationId' in resource.data) || request.resource.data.organizationId == resource.data.organizationId);
         allow delete: if canEdit(orgId) && collectionName in ['transactions', 'products', 'sales', 'orders', 'productCategories', 'customers', 'suppliers', 'invoices', 'purchases'];
       }
       match /invitations/{email} {

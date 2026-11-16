@@ -1,4 +1,4 @@
-import { addDoc, collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { firestore } from '../firebase';
 import { auth } from '../firebase';
 
@@ -8,14 +8,17 @@ const membershipRef = (uid, orgId) => doc(firestore, 'users', uid, 'memberships'
 export const createOrganization = async (uid, { name, type, details = {} }) => {
   const cleanName = String(name || '').trim();
   if (!uid || !cleanName) throw new Error('Enter an organisation name.');
-  const org = await addDoc(collection(firestore, 'organizations'), {
+  const orgRef = doc(collection(firestore, 'organizations'));
+  const batch = writeBatch(firestore);
+  batch.set(orgRef, {
     name: cleanName, type: type === 'company' ? 'company' : 'organization', ownerId: uid, details,
     createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
   });
-  await setDoc(membershipRef(uid, org.id), {
-    organizationId: org.id, organizationName: cleanName, email: auth.currentUser?.email?.trim().toLowerCase() || '', displayName: auth.currentUser?.displayName || '', role: 'owner', status: 'active', createdAt: serverTimestamp(),
+  batch.set(membershipRef(uid, orgRef.id), {
+    organizationId: orgRef.id, organizationName: cleanName, email: auth.currentUser?.email?.trim().toLowerCase() || '', displayName: auth.currentUser?.displayName || '', role: 'owner', status: 'active', createdAt: serverTimestamp(),
   });
-  return { id: org.id, name: cleanName, type: type === 'company' ? 'company' : 'organization', details, role: 'owner', status: 'active' };
+  await batch.commit();
+  return { id: orgRef.id, name: cleanName, type: type === 'company' ? 'company' : 'organization', details, role: 'owner', status: 'active' };
 };
 
 export const updateOrganizationDetails = async (organizationId, details) => {
@@ -77,7 +80,9 @@ export const acceptOrganizationInvitation = async (uid, email, displayName, invi
 export const listOrganizationMembers = async (organizationId) => {
   if (!organizationId) return [];
   const snapshot = await getDocs(query(collectionGroupMemberships(), where('organizationId', '==', organizationId)));
-  return snapshot.docs.map((item) => ({ id: item.ref.parent.parent.id, ...item.data() }));
+  return snapshot.docs
+    .map((item) => ({ id: item.ref.parent.parent.id, ...item.data() }))
+    .filter((member) => member.status === 'active');
 };
 
 const collectionGroupMemberships = () => collectionGroup(firestore, 'memberships');

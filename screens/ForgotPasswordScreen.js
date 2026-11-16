@@ -1,11 +1,14 @@
+import { userFacingError } from '../utils/userFacingErrors';
 // screens/ForgotPasswordScreen.js
 import React, { useState, useContext } from 'react';
 import { View, StyleSheet, Image } from 'react-native';
 import { TextInput, Button, Title, Text } from 'react-native-paper';
 import { AuthContext } from '../AuthContext';
+import { ThemeContext } from '../ThemeContext';
 
 export default function ForgotPasswordScreen({ navigation }) {
     const { resetPassword } = useContext(AuthContext);
+    const { palette } = useContext(ThemeContext);
     const [email, setEmail] = useState('');
 
     const handleReset = () => {
@@ -19,25 +22,25 @@ export default function ForgotPasswordScreen({ navigation }) {
                 navigation.navigate('Login');
             })
             .catch((error) => {
-                alert(error.message);
+                alert(userFacingError(error, 'Could not complete the request. Please try again.'));
             });
     };
 
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, { backgroundColor: palette.background }]}>
             <Image source={require('../assets/logo.png')} style={styles.logo} />
-            <Title style={styles.title}>Reset Password</Title>
+            <Title style={[styles.title, { color: palette.text }]}>Reset Password</Title>
             <TextInput
                 label="Email"
                 value={email}
                 onChangeText={setEmail}
-                style={styles.input}
+                style={[styles.input, { backgroundColor: palette.surface }]}
                 autoCapitalize="none"
             />
             <Button mode="contained" onPress={handleReset} style={styles.button}>
                 Send Reset Email
             </Button>
-            <Text onPress={() => navigation.navigate('Login')} style={styles.link}>
+            <Text onPress={() => navigation.navigate('Login')} style={[styles.link, { color: palette.primary }]}>
                 Back to Login
             </Text>
         </View>

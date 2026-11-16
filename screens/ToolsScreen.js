@@ -1,3 +1,4 @@
+import { userFacingError } from '../utils/userFacingErrors';
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View, Platform, KeyboardAvoidingView } from 'react-native';
 import { Button, Card, Menu, Text, TextInput, Title } from 'react-native-paper';
@@ -8,14 +9,16 @@ import { CURRENCY_SYMBOLS, currencyFromCode, formatMoney, inPeriod, toNumber } f
 import usePersistedState from '../utils/usePersistedState';
 import { getExchangeRate } from '../services/currencyConversion';
 import useReportingAmounts from '../hooks/useReportingAmounts';
+import { ThemeContext } from '../ThemeContext';
 
 const currencies = Object.keys(CURRENCY_SYMBOLS);
 
 export default function ToolsScreen({ route }) {
   const mode = route?.params?.mode || (route?.name === 'Budget' ? 'budget' : 'converter');
-  const { user, activeWorkspace } = useContext(AuthContext);
+  const { user, activeWorkspace, storageRevision } = useContext(AuthContext);
   const { transactions } = useContext(TransactionsContext);
   const { currency } = useContext(CurrencyContext);
+  const { palette } = useContext(ThemeContext);
   const [amount, setAmount] = useState('1');
   const [from, setFrom] = useState(currency?.code || 'UGX');
   const [to, setTo] = useState('USD');
@@ -27,7 +30,7 @@ export default function ToolsScreen({ route }) {
     [currency?.code],
   );
   const budgetKey = `expenseTracker.${user?.uid || 'guest'}.${activeWorkspace?.id || 'personal'}.spendingTargets`;
-  const [savedTargets, setSavedTargets, budgetHydrated] = usePersistedState(budgetKey, { daily: 0, weekly: 0, monthly: 0 });
+  const [savedTargets, setSavedTargets, budgetHydrated] = usePersistedState(budgetKey, { daily: 0, weekly: 0, monthly: 0 }, storageRevision);
   const [budgetInput, setBudgetInput] = useState('');
   const [targetPeriod, setTargetPeriod] = useState('monthly');
   const { amounts: reportingAmounts, loading: reportingLoading, error: reportingError } = useReportingAmounts(transactions, currency?.code, 'amount');
@@ -53,7 +56,7 @@ export default function ToolsScreen({ route }) {
       .then((latest) => {
         if (active) { setExchangeRate(String(latest.rate)); setRateStatus(`Rate: 1 ${from} = ${Number(latest.rate).toLocaleString(undefined, { maximumFractionDigits: 8 })} ${to}\nRate timestamp: ${new Date(latest.timestamp).toLocaleString()}\nIndicative market rate, not a guaranteed bank or mobile-money settlement rate.`); }
       })
-      .catch((error) => { if (active) setRateStatus(error.message || 'Exchange rate is temporarily unavailable.'); });
+      .catch((error) => { if (active) setRateStatus(userFacingError(error, 'Exchange rate is temporarily unavailable.')); });
     return () => { active = false; };
   }, [from, to, mode]);
 
@@ -67,36 +70,36 @@ export default function ToolsScreen({ route }) {
   const remaining = Math.max(0, savedBudget - spent);
   const progress = savedBudget > 0 ? Math.min(100, spent / savedBudget * 100) : 0;
 
-  return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'}><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-    {mode === 'converter' && <Card style={styles.card}>
+  return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'}><ScrollView contentContainerStyle={[styles.container, { backgroundColor: palette.background }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+    {mode === 'converter' && <Card style={[styles.card, { backgroundColor: palette.surface }]} >
       <Card.Content>
-        <TextInput label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" style={styles.input} />
+        <TextInput label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" style={[styles.input, { backgroundColor: palette.input }]} />
         <View style={styles.currencyRow}>
           <Menu visible={menu === 'from'} onDismiss={() => setMenu(null)} anchor={<Button mode="outlined" onPress={() => setMenu('from')}>{from}  ▾</Button>}>
             {orderedCurrencies.map((code) => <Menu.Item key={code} title={`${currencyFromCode(code).symbol}  ${code}`} onPress={() => { setFrom(code); setMenu(null); }} />)}
           </Menu>
-          <Text style={styles.arrow}>→</Text>
+          <Text style={[styles.arrow, { color: palette.textMuted }]}>→</Text>
           <Menu visible={menu === 'to'} onDismiss={() => setMenu(null)} anchor={<Button mode="outlined" onPress={() => setMenu('to')}>{to}  ▾</Button>}>
             {orderedCurrencies.map((code) => <Menu.Item key={code} title={`${currencyFromCode(code).symbol}  ${code}`} onPress={() => { setTo(code); setMenu(null); }} />)}
           </Menu>
         </View>
-        <TextInput label={`1 ${from} = ? ${to}`} value={exchangeRate} onChangeText={(value) => { setExchangeRate(value); setRateStatus(`Manual rate entered. 1 ${from} = ${value} ${to}. Verify this rate before using it for a real transaction.`); }} keyboardType="decimal-pad" style={styles.input} />
-        <Text style={styles.rateStatus}>{rateStatus}</Text>
-        <Text style={styles.rateDisclosure}>The amount below is an estimate using the displayed rate. Providers may apply fees or a different settlement rate.</Text>
-        <View style={styles.result}><Text style={styles.resultLabel}>Converted amount</Text><Text style={styles.resultAmount}>{formatMoney(converted, currencyFromCode(to))}</Text></View>
+        <TextInput label={`1 ${from} = ? ${to}`} value={exchangeRate} onChangeText={(value) => { setExchangeRate(value); setRateStatus(`Manual rate entered. 1 ${from} = ${value} ${to}. Verify this rate before using it for a real transaction.`); }} keyboardType="decimal-pad" style={[styles.input, { backgroundColor: palette.input }]} />
+        <Text style={[styles.rateStatus, { color: palette.textMuted }]} >{rateStatus}</Text>
+        <Text style={[styles.rateDisclosure, { color: palette.textMuted }]} >The amount below is an estimate using the displayed rate. Providers may apply fees or a different settlement rate.</Text>
+        <View style={styles.result}><Text style={[styles.resultLabel, { color: palette.textMuted }]} >Converted amount</Text><Text style={[styles.resultAmount, { color: palette.text }]} >{formatMoney(converted, currencyFromCode(to))}</Text></View>
       </Card.Content>
     </Card>}
 
-    {mode === 'budget' && <Card style={styles.card}>
+    {mode === 'budget' && <Card style={[styles.card, { backgroundColor: palette.surface }]} >
       <Card.Content>
         <View style={styles.targets}>{['daily','weekly','monthly'].map((period) => <Button key={period} compact mode={targetPeriod === period ? 'contained' : 'outlined'} onPress={() => setTargetPeriod(period)}>{period[0].toUpperCase()+period.slice(1)}</Button>)}</View>
-        <TextInput label={`${targetPeriod[0].toUpperCase()+targetPeriod.slice(1)} target (${currency?.code || 'UGX'})`} value={budgetInput} onChangeText={setBudgetInput} keyboardType="decimal-pad" style={styles.input} />
+        <TextInput label={`${targetPeriod[0].toUpperCase()+targetPeriod.slice(1)} target (${currency?.code || 'UGX'})`} value={budgetInput} onChangeText={setBudgetInput} keyboardType="decimal-pad" style={[styles.input, { backgroundColor: palette.input }]} />
         <Button mode="contained" compact onPress={saveBudget} style={styles.button}>Save target</Button>
-        <View style={styles.budgetRow}><Text>This {targetPeriod}</Text><Text style={styles.spent}>{reportingLoading || reportingError ? '—' : formatMoney(spent, currency)}</Text></View>
-        {!!reportingError && <Text style={styles.rateStatus}>{reportingError}</Text>}
+        <View style={styles.budgetRow}><Text style={{ color: palette.text }}>This {targetPeriod}</Text><Text style={[styles.spent, { color: palette.expense }]} >{reportingLoading || reportingError ? '—' : formatMoney(spent, currency)}</Text></View>
+        {!!reportingError && <Text style={[styles.rateStatus, { color: palette.textMuted }]} >{reportingError}</Text>}
         {savedBudget > 0 && <>
-          <View style={styles.track}><View style={[styles.fill, { width: `${progress}%`, backgroundColor: progress >= 100 ? '#c34c3a' : '#3d8050' }]} /></View>
-          <View style={styles.budgetRow}><Text>Remaining</Text><Text style={styles.remaining}>{reportingLoading || reportingError ? '—' : formatMoney(remaining, currency)}</Text></View>
+          <View style={[styles.track, { backgroundColor: palette.surfaceAlt }]} ><View style={[styles.fill, { width: `${progress}%`, backgroundColor: progress >= 100 ? '#c34c3a' : '#3d8050' }]} /></View>
+          <View style={styles.budgetRow}><Text style={{ color: palette.text }}>Remaining</Text><Text style={[styles.remaining, { color: palette.income }]} >{reportingLoading || reportingError ? '—' : formatMoney(remaining, currency)}</Text></View>
         </>}
       </Card.Content>
     </Card>}

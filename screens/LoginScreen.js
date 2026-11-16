@@ -1,11 +1,14 @@
+import { userFacingError } from '../utils/userFacingErrors';
 // screens/LoginScreen.js
 import React, { useState, useContext } from 'react';
 import { ScrollView, StyleSheet, Image, Alert } from 'react-native';
 import { TextInput, Button, Title, Text } from 'react-native-paper';
 import { AuthContext } from '../AuthContext';
+import { ThemeContext } from '../ThemeContext';
 
 export default function LoginScreen({ navigation }) {
   const { signIn, startGuestMode, guestTransferError } = useContext(AuthContext);
+  const { palette } = useContext(ThemeContext);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -16,19 +19,19 @@ export default function LoginScreen({ navigation }) {
         return userCredential;
       })
       .catch((error) => {
-        Alert.alert('Could not sign in', error.message || 'Check your details and try again.');
+        Alert.alert('Could not sign in', userFacingError(error, 'Check your details and try again.'));
       });
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: palette.background }]} keyboardShouldPersistTaps="handled">
       <Image source={require('../assets/logo.png')} style={styles.logo} />
-      <Title style={styles.title}>Login</Title>
+      <Title style={[styles.title, { color: palette.text }]}>Login</Title>
       <TextInput
         label="Email"
         value={email}
         onChangeText={setEmail}
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.surface }]}
         autoCapitalize="none"
       />
       <TextInput
@@ -36,28 +39,28 @@ export default function LoginScreen({ navigation }) {
         value={password}
         onChangeText={setPassword}
         secureTextEntry={!showPassword}
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.surface }]}
         right={
           <TextInput.Icon
             name={showPassword ? 'eye-off' : 'eye'}
             onPress={() => setShowPassword(!showPassword)}
-            color="#000"
+            color={palette.text}
           />
         }
       />
       <Button mode="contained" onPress={handleLogin} style={styles.button}>
         Login
       </Button>
-      <Text onPress={() => navigation.navigate('ForgotPassword')} style={styles.link}>
+      <Text onPress={() => navigation.navigate('ForgotPassword')} style={[styles.link, { color: palette.primary }]} >
         Forgot Password?
       </Text>
-      <Text onPress={() => navigation.navigate('Signup')} style={styles.link}>
+      <Text onPress={() => navigation.navigate('Signup')} style={[styles.link, { color: palette.primary }]} >
         Don't have an account? Sign Up
       </Text>
-      <Text style={styles.guestCopy}>You can use a personal ledger without creating an account. Records stay on this device unless you export or back them up.</Text>
-      <Text style={styles.guestCopy}>If you started a guest ledger on this device, signing in copies it into this account's local records. Existing account records with matching IDs are kept.</Text>
+      <Text style={[styles.guestCopy, { color: palette.textMuted }]} >You can use a personal ledger without creating an account. Records stay on this device unless you export or back them up.</Text>
+      <Text style={[styles.guestCopy, { color: palette.textMuted }]} >If you started a guest ledger on this device, signing in copies it into this account's local records. Existing account records with matching IDs are kept.</Text>
       {!!guestTransferError && <Text accessibilityRole="alert" style={styles.transferError}>{guestTransferError}</Text>}
-      <Button mode="outlined" onPress={() => startGuestMode().catch((error) => Alert.alert('Could not start local mode', error.message || 'Try again.'))} style={styles.guestButton}>
+      <Button mode="outlined" onPress={() => startGuestMode().catch((error) => Alert.alert('Could not start local mode', userFacingError(error, 'Please check your details and try again.')))} style={styles.guestButton}>
         Continue without an account
       </Button>
     </ScrollView>

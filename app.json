@@ -3,16 +3,16 @@
     "name": "FinanceTracker",
     "slug": "expense-tracker-masebba",
     "scheme": "expensetracker",
-    "version": "1.0.1",
+    "version": "1.0.4",
     "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "package": "com.masebba.ExpenseTracker",
-      "versionCode": 2,
+      "versionCode": 5,
       "backgroundColor": "#ffffff",
       "softwareKeyboardLayoutMode": "resize",
       "allowBackup": false
@@ -52,11 +52,16 @@
         }
       ],
       "expo-sharing",
-      "expo-document-picker"
+      "expo-document-picker",
+      [
+        "expo-notifications",
+        {
+          "color": "#2f7040",
+          "defaultChannel": "default"
+        }
+      ]
     ],
-
-    "runtimeVersion": "1.0.1",
-
+    "runtimeVersion": "1.0.4",
     "updates": {
       "url": "https://u.expo.dev/e686eb7d-2e35-4e19-82e7-3d811f8a4cc1"
     }

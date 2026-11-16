@@ -1,3 +1,4 @@
+import { userFacingError } from '../utils/userFacingErrors';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
 import { Button, Dialog, Portal, Text } from 'react-native-paper';
@@ -23,7 +24,7 @@ export default function TermsOfServiceButton({ style }) {
           setLoadError('');
         },
         (error) => {
-          setLoadError(error?.message || 'The latest terms could not be loaded.');
+          setLoadError(userFacingError(error, 'The latest terms could not be loaded. Check your connection and try again.'));
         },
       ),
     [],

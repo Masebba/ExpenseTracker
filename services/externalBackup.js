@@ -59,7 +59,7 @@ export function scheduleExternalBackup(uid) {
   const timer = setTimeout(() => {
     debounceTimers.delete(uid);
     pendingWrite = pendingWrite.then(() => writeExternalBackup(uid)).catch((error) => {
-      saveStatus(uid, `Backup needs attention: ${error?.message || 'retry the backup'}`).catch(() => {});
+      saveStatus(uid, 'Backup needs attention. Reconnect the selected folder or choose it again, then retry the backup.').catch(() => {});
       console.warn('External backup could not be updated:', error?.message || error);
     });
   }, 1200);
@@ -67,22 +67,29 @@ export function scheduleExternalBackup(uid) {
 }
 
 export async function writeExternalBackup(uid) {
-  const directoryUri = await getExternalBackupFolder(uid);
-  if (!directoryUri) return false;
-  try {
-    const keys = (await AsyncStorage.getAllKeys()).filter((key) => (key.startsWith(`expenseTracker.${uid}.`) || key === `expenseTracker.currency.${uid}`) && !key.startsWith(`expenseTracker.externalBackup.${uid}.`));
-    const data = Object.fromEntries(await AsyncStorage.multiGet(keys));
-    const snapshot = JSON.stringify({ format: 'FinanceTracker backup', version: 1, updatedAt: new Date().toISOString(), data }, null, 2);
-    let backupUri = await AsyncStorage.getItem(fileKey(uid));
-    if (!backupUri) {
-      backupUri = await StorageAccessFramework.createFileAsync(directoryUri, 'FinanceTracker-backup.json', 'application/json');
-      await AsyncStorage.setItem(fileKey(uid), backupUri);
+  if (!uid) return false;
+  // Hold the account write queue during the complete snapshot and file write,
+  // so the backup never captures only one side of a multi-key transaction.
+  const { withLocalOwnerWriteLock } = await import('../utils/appUtils');
+  return withLocalOwnerWriteLock(uid, async () => {
+    const directoryUri = await getExternalBackupFolder(uid);
+    if (!directoryUri) return false;
+    try {
+      const keys = (await AsyncStorage.getAllKeys()).filter((key) => (key.startsWith(`expenseTracker.${uid}.`) || key === `expenseTracker.currency.${uid}` || key === `expenseTracker.currency.manual.${uid}`) && !key.startsWith(`expenseTracker.externalBackup.${uid}.`) && !key.endsWith('.pendingLocalTransaction') && !key.includes('.cloudBaseline.'));
+      const data = Object.fromEntries(await AsyncStorage.multiGet(keys));
+      const snapshot = JSON.stringify({ format: 'FinanceTracker backup', version: 1, updatedAt: new Date().toISOString(), data }, null, 2);
+      let backupUri = await AsyncStorage.getItem(fileKey(uid));
+      if (!backupUri) {
+        backupUri = await StorageAccessFramework.createFileAsync(directoryUri, 'FinanceTracker-backup.json', 'application/json');
+        await AsyncStorage.setItem(fileKey(uid), backupUri);
+      }
+      await writeAsStringAsync(backupUri, snapshot);
+      await saveStatus(uid, `Last backup: ${new Date().toLocaleString()}`);
+      return true;
+    } catch (error) {
+      await saveStatus(uid, 'Backup needs attention. Reconnect the selected folder or choose it again, then retry the backup.').catch(() => {});
+      console.warn('[Backup] External backup write failed:', error?.message || error);
+      throw error;
     }
-    await writeAsStringAsync(backupUri, snapshot);
-    await saveStatus(uid, `Last backup: ${new Date().toLocaleString()}`);
-    return true;
-  } catch (error) {
-    await saveStatus(uid, `Backup needs attention: ${error?.message || 'Choose the folder again or retry the backup.'}`).catch(() => {});
-    throw error;
-  }
+  });
 }

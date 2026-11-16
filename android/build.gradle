@@ -8,6 +8,8 @@ buildscript {
   dependencies {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
+    // Used conditionally when android/app/google-services.json is supplied.
+    classpath('com.google.gms:google-services:4.5.0')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
   }
 }

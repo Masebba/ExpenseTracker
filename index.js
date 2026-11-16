@@ -13,6 +13,10 @@ class StartupErrorBoundary extends React.Component {
     return { error };
   }
 
+  componentDidCatch(error) {
+    console.error('[Startup] App initialization failed:', error);
+  }
+
   render() {
     if (this.state.error) {
       const message = String(this.state.error?.message || 'The app could not start.');
@@ -23,8 +27,13 @@ class StartupErrorBoundary extends React.Component {
           <Text style={styles.body}>
             {missingFirebaseConfig
               ? 'Firebase configuration is missing from this build. Create a .env file with the EXPO_PUBLIC_FIREBASE_* values (see .env.example) and rebuild the app.'
-              : message}
+              : 'FinanceTracker could not finish starting. Please close and reopen the app. If this continues, contact support and share the app version.'}
           </Text>
+          {__DEV__ && !missingFirebaseConfig && (
+            <Text selectable style={styles.debugDetails}>
+              Development detail: {message}
+            </Text>
+          )}
         </View>
       );
     }
@@ -36,6 +45,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: '#f4f6f3' },
   title: { fontSize: 20, fontWeight: '800', color: '#24432b', marginBottom: 12, textAlign: 'center' },
   body: { fontSize: 14, color: '#4a584d', lineHeight: 21, textAlign: 'center' },
+  debugDetails: { fontSize: 12, color: '#7a3028', lineHeight: 18, marginTop: 14, textAlign: 'left', width: '100%' },
 });
 
 function AppLoader() {

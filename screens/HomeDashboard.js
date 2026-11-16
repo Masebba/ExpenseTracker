@@ -10,18 +10,23 @@ import {
   View,
   Platform,
   KeyboardAvoidingView,
+  Animated,
+  Easing,
 } from "react-native";
 import { Button, Card, Dialog, Portal, Text } from "react-native-paper";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { TransactionsContext } from "../TransactionsContext";
+import { AuthContext } from "../AuthContext";
 import { CurrencyContext } from "../CurrencyContext";
 import { AppFeaturesContext } from "../AppFeaturesContext";
 import { ProductsContext } from "../ProductsContext";
 import { SalesContext } from "../SalesContext";
 import { OrdersContext } from "../OrdersContext";
 import { BusinessRecordsContext } from "../BusinessRecordsContext";
-import { inPeriod, formatMoney, isValidHttpUrl, CONTENT_MAX_WIDTH, contentWidthStyle } from "../utils/appUtils";
+import { inPeriod, formatMoney, normalizeAdvertImageUrl, CONTENT_MAX_WIDTH, contentWidthStyle } from "../utils/appUtils";
 import useReportingAmounts from "../hooks/useReportingAmounts";
+import { userFacingError } from "../utils/userFacingErrors";
+import { ThemeContext } from "../ThemeContext";
 
 const shortcuts = [
   {
@@ -73,9 +78,13 @@ export default function HomeDashboard({ navigation }) {
   const { customers = [], suppliers = [], invoices = [], purchases = [] } = useContext(BusinessRecordsContext);
   const { currency } = useContext(CurrencyContext);
   const { ads } = useContext(AppFeaturesContext);
+  const { activeWorkspace } = useContext(AuthContext);
+  const { isDark, palette } = useContext(ThemeContext);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [selectedAd, setSelectedAd] = useState(null);
   const [failedAdImages, setFailedAdImages] = useState({});
+  const [summaryPeriod, setSummaryPeriod] = useState('daily');
+  const summaryTransition = useRef(new Animated.Value(1)).current;
   const carousel = useRef(null);
   const slideIndex = useRef(0);
   const contentWidth = Math.min(windowWidth, CONTENT_MAX_WIDTH);
@@ -93,13 +102,30 @@ export default function HomeDashboard({ navigation }) {
   const shortcutWidth = `${(100 / shortcutColumns).toFixed(4)}%`;
   const { amounts: reportingAmounts, loading: reportingLoading, error: reportingError } = useReportingAmounts(transactions, currency?.code, "amount");
   const hasBusinessActivity = [transactions, products, sales, orders, customers, suppliers, invoices, purchases].some((items) => items.length > 0);
-  const today = transactions.filter((item) => inPeriod(item.timestamp, "daily"));
-  const income = today
-    .filter((item) => item.type === "income")
+  const periodOptions = [
+    { label: 'Today', value: 'daily' },
+    { label: 'This week', value: 'weekly' },
+    { label: 'This month', value: 'monthly' },
+  ];
+  const periodLabel = periodOptions.find((item) => item.value === summaryPeriod)?.label || 'Today';
+  const periodTransactions = transactions
+    .filter((item) => inPeriod(item.timestamp, summaryPeriod))
+    .slice()
+    .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+  const periodIncome = periodTransactions
+    .filter((item) => item.type === 'income')
     .reduce((sum, item) => sum + (reportingAmounts[item.id] || 0), 0);
-  const expense = today
-    .filter((item) => item.type === "expense")
+  const periodExpense = periodTransactions
+    .filter((item) => item.type === 'expense')
     .reduce((sum, item) => sum + (reportingAmounts[item.id] || 0), 0);
+  const selectSummaryPeriod = (nextPeriod) => {
+    if (nextPeriod === summaryPeriod) return;
+    Animated.timing(summaryTransition, { toValue: 0, duration: 190, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(({ finished }) => {
+      if (!finished) return;
+      setSummaryPeriod(nextPeriod);
+      Animated.timing(summaryTransition, { toValue: 1, duration: 440, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    });
+  };
 
   useEffect(() => {
     slideIndex.current = 0;
@@ -135,48 +161,70 @@ export default function HomeDashboard({ navigation }) {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
-        style={styles.page}
-        contentContainerStyle={styles.container}
+        style={[styles.page, { backgroundColor: palette.background }]}
+        contentContainerStyle={[styles.container, { backgroundColor: palette.background }]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
         {!hasBusinessActivity && (
-          <Card style={styles.setupCard}>
+          <Card style={[styles.setupCard, { backgroundColor: palette.surface }]}>
             <Card.Content>
-              <View style={styles.setupIcon}><MaterialCommunityIcons name="briefcase-check-outline" size={28} color="#2f7040" /></View>
-              <Text style={styles.setupTitle}>Welcome to FinanceTracker</Text>
-              <Text style={styles.setupText}>Bring your business records together in one place, from products and customers to sales, purchases, invoices and everyday transactions. Start with one step, then build your workspace as you go.</Text>
-              <View style={styles.setupStep}><Text style={styles.setupStepNumber}>1</Text><View style={styles.setupStepBody}><Text style={styles.setupStepTitle}>Set up what you sell</Text><Text style={styles.setupText}>Add products and prices to prepare for sales.</Text><Button compact mode="contained" onPress={() => navigation.navigate('PoSNavigator')}>Open Trade</Button></View></View>
-              <View style={styles.setupStep}><Text style={styles.setupStepNumber}>2</Text><View style={styles.setupStepBody}><Text style={styles.setupStepTitle}>Create a business contact</Text><Text style={styles.setupText}>Save a customer or supplier for your documents.</Text><View style={styles.setupActions}><Button compact onPress={() => navigation.navigate('Customers')}>Add customer</Button><Button compact onPress={() => navigation.navigate('Suppliers')}>Add supplier</Button></View></View></View>
-              <View style={styles.setupStep}><Text style={styles.setupStepNumber}>3</Text><View style={styles.setupStepBody}><Text style={styles.setupStepTitle}>Record your first activity</Text><Text style={styles.setupText}>Capture income or an expense, or create an invoice.</Text><View style={styles.setupActions}><Button compact onPress={() => navigation.navigate('Income')}>Income</Button><Button compact onPress={() => navigation.navigate('Expense')}>Expense</Button><Button compact onPress={() => navigation.navigate('Invoices')}>Invoice</Button></View></View></View>
+              <View style={[styles.setupIcon, { backgroundColor: palette.surfaceAlt }]}><MaterialCommunityIcons name="briefcase-check-outline" size={28} color={palette.primary} /></View>
+              <Text style={[styles.setupTitle, { color: palette.text }]}>Welcome to FinanceTracker</Text>
+              <Text style={[styles.setupText, { color: palette.textMuted }]}>Bring your business records together in one place, from products and customers to sales, purchases, invoices and everyday transactions. Start with one step, then build your workspace as you go.</Text>
+              <View style={[styles.setupStep, { borderTopColor: palette.border }]}><Text style={[styles.setupStepNumber, { backgroundColor: palette.surfaceAlt, color: palette.primary }]}>1</Text><View style={styles.setupStepBody}><Text style={[styles.setupStepTitle, { color: palette.text }]}>Set up what you sell</Text><Text style={[styles.setupText, { color: palette.textMuted }]}>Add products and prices to prepare for sales.</Text><Button compact mode="contained" onPress={() => navigation.navigate('PoSNavigator')}>Open Trade</Button></View></View>
+              <View style={[styles.setupStep, { borderTopColor: palette.border }]}><Text style={[styles.setupStepNumber, { backgroundColor: palette.surfaceAlt, color: palette.primary }]}>2</Text><View style={styles.setupStepBody}><Text style={[styles.setupStepTitle, { color: palette.text }]}>Create a business contact</Text><Text style={[styles.setupText, { color: palette.textMuted }]}>Save a customer or supplier for your documents.</Text><View style={styles.setupActions}><Button compact onPress={() => navigation.navigate('Customers')}>Add customer</Button><Button compact onPress={() => navigation.navigate('Suppliers')}>Add supplier</Button></View></View></View>
+              <View style={[styles.setupStep, { borderTopColor: palette.border }]}><Text style={[styles.setupStepNumber, { backgroundColor: palette.surfaceAlt, color: palette.primary }]}>3</Text><View style={styles.setupStepBody}><Text style={[styles.setupStepTitle, { color: palette.text }]}>Record your first activity</Text><Text style={[styles.setupText, { color: palette.textMuted }]}>Capture income or an expense, or create an invoice.</Text><View style={styles.setupActions}><Button compact onPress={() => navigation.navigate('Income')}>Income</Button><Button compact onPress={() => navigation.navigate('Expense')}>Expense</Button><Button compact onPress={() => navigation.navigate('Invoices')}>Invoice</Button></View></View></View>
             </Card.Content>
           </Card>
         )}
 
-        <Card style={styles.summaryCard}>
+        <Card style={[styles.summaryCard, { backgroundColor: palette.surface }]}>
           <Card.Content>
-            <Text style={styles.summaryTitle}>Today · {currency?.code || "UGX"}</Text>
-            {!!reportingError && <Text style={styles.metricCaption}>{reportingError}</Text>}
-            <View style={styles.metrics}>
-              <View style={styles.metric}>
-                <Text style={styles.metricCaption}>Income</Text>
-                <Text numberOfLines={1} style={styles.income}>
-                  {reportingLoading || reportingError ? '—' : formatMoney(income, currency)}
-                </Text>
-              </View>
-              <View style={styles.metric}>
-                <Text style={styles.metricCaption}>Expenses</Text>
-                <Text numberOfLines={1} style={styles.expense}>
-                  {reportingLoading || reportingError ? '—' : formatMoney(expense, currency)}
-                </Text>
-              </View>
-              <View style={styles.metric}>
-                <Text style={styles.metricCaption}>Net</Text>
-                <Text numberOfLines={1} style={styles.net}>
-                  {reportingLoading || reportingError ? '—' : formatMoney(income - expense, currency)}
-                </Text>
-              </View>
+            <Text style={[styles.summaryTitle, { color: palette.textMuted }]}>{periodLabel} · {currency?.code || 'UGX'}</Text>
+            <Text style={[styles.workspaceCaption, { color: palette.textMuted }]}>{activeWorkspace?.id === 'personal' ? 'Personal account' : (activeWorkspace?.name || 'Business workspace')} · Trade sales are included in income.</Text>
+            {!!reportingError && <Text style={[styles.metricCaption, { color: palette.danger }]}>{userFacingError({ message: reportingError }, 'Some totals could not be calculated right now. Please try again later.')}</Text>}
+            <View style={[styles.periodPicker, { backgroundColor: palette.surfaceAlt }]} accessibilityRole="tablist">
+              {periodOptions.map((option) => {
+                const selected = summaryPeriod === option.value;
+                return <TouchableOpacity key={option.value} onPress={() => selectSummaryPeriod(option.value)} accessibilityRole="tab" accessibilityState={{ selected }} style={[styles.periodButton, selected && { backgroundColor: palette.primary }]}>
+                  <Text style={[styles.periodButtonText, { color: selected ? (isDark ? '#101712' : '#ffffff') : palette.textMuted }]}>{option.label}</Text>
+                </TouchableOpacity>;
+              })}
             </View>
+            <Animated.View style={{ opacity: summaryTransition, transform: [{ translateY: summaryTransition.interpolate({ inputRange: [0, 1], outputRange: [7, 0] }) }] }}>
+              <View style={styles.metrics}>
+                <View style={styles.metric}>
+                  <Text style={[styles.metricCaption, { color: palette.textMuted }]}>Income</Text>
+                  <Text numberOfLines={1} style={[styles.income, { color: palette.income }]}>{reportingLoading || reportingError ? '—' : formatMoney(periodIncome, currency)}</Text>
+                </View>
+                <View style={styles.metric}>
+                  <Text style={[styles.metricCaption, { color: palette.textMuted }]}>Expenses</Text>
+                  <Text numberOfLines={1} style={[styles.expense, { color: palette.expense }]}>{reportingLoading || reportingError ? '—' : formatMoney(periodExpense, currency)}</Text>
+                </View>
+                <View style={styles.metric}>
+                  <Text style={[styles.metricCaption, { color: palette.textMuted }]}>Net</Text>
+                  <Text numberOfLines={1} style={[styles.net, { color: palette.text }]}>{reportingLoading || reportingError ? '—' : formatMoney(periodIncome - periodExpense, currency)}</Text>
+                </View>
+              </View>
+              <View style={[styles.activityHeader, { borderTopColor: palette.border }]}>
+                <Text style={[styles.activityTitle, { color: palette.text }]}>Activity</Text>
+                <Text style={[styles.activityCount, { color: palette.textMuted }]}>{periodTransactions.length} transaction{periodTransactions.length === 1 ? '' : 's'}</Text>
+              </View>
+              {periodTransactions.length ? periodTransactions.slice(0, 3).map((item) => {
+                const isIncome = item.type === 'income';
+                const title = item.description || item.category || (isIncome ? 'Income' : 'Expense');
+                const when = item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                return <View key={item.id} style={styles.activityRow}>
+                  <View style={[styles.activityIcon, { backgroundColor: palette.surfaceAlt }]}><MaterialCommunityIcons name={isIncome ? 'arrow-bottom-left' : 'arrow-top-right'} color={isIncome ? palette.income : palette.expense} size={18} /></View>
+                  <View style={styles.activityTextBox}>
+                    <Text numberOfLines={1} style={[styles.activityName, { color: palette.text }]}>{title}</Text>
+                    <Text style={[styles.activityMeta, { color: palette.textMuted }]}>{isIncome ? 'Income' : 'Expense'}{when ? ` · ${when}` : ''}</Text>
+                  </View>
+                  <Text numberOfLines={1} style={[styles.activityAmount, { color: isIncome ? palette.income : palette.expense }]}>{formatMoney(reportingAmounts[item.id] || 0, currency)}</Text>
+                </View>;
+              }) : <Text style={[styles.emptyActivity, { color: palette.textMuted }]}>No transactions for {periodLabel.toLowerCase()} yet.</Text>}
+            </Animated.View>
           </Card.Content>
         </Card>
 
@@ -189,15 +237,15 @@ export default function HomeDashboard({ navigation }) {
               accessibilityRole="button"
             >
               <View
-                style={[styles.shortcutIcon, { backgroundColor: item.color }]}
+                style={[styles.shortcutIcon, { backgroundColor: palette.surfaceAlt }]}
               >
                 <MaterialCommunityIcons
                   name={item.icon}
                   size={28}
-                  color="#315d3b"
+                  color={palette.primary}
                 />
               </View>
-              <Text style={styles.shortcutText}>{item.title}</Text>
+              <Text style={[styles.shortcutText, { color: palette.text }]}>{item.title}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -218,8 +266,9 @@ export default function HomeDashboard({ navigation }) {
             contentContainerStyle={styles.carouselContent}
           >
             {visibleAds.map((ad) => {
+              const imageUrl = normalizeAdvertImageUrl(ad.imageUrl);
               const imageKey = `${ad.id}:${ad.imageUrl}`;
-              const hasImage = isValidHttpUrl(ad.imageUrl) && !failedAdImages[imageKey];
+              const hasImage = Boolean(imageUrl) && !failedAdImages[imageKey];
               return (
               <TouchableOpacity
                 key={ad.id}
@@ -232,19 +281,19 @@ export default function HomeDashboard({ navigation }) {
                 {hasImage ? (
                   <View style={styles.bannerImageBackground}>
                     <Image
-                      source={{ uri: ad.imageUrl }}
+                      source={{ uri: imageUrl }}
                       style={styles.bannerImage}
                       resizeMode="cover"
-                      onError={() => setFailedAdImages((current) => ({ ...current, [imageKey]: true }))}
+                      onError={(event) => { console.warn('[Advert image] Could not load', imageUrl, event?.nativeEvent?.error || 'Unknown image error'); setFailedAdImages((current) => ({ ...current, [imageKey]: true })); }}
                     />
-                    <View style={styles.bannerShade}>
-                      <Text numberOfLines={1} style={styles.businessName}>
+                    <View style={[styles.bannerShade, { backgroundColor: isDark ? 'rgba(13,22,16,0.68)' : 'rgba(255,255,255,0.38)' }]}>
+                      <Text numberOfLines={1} style={[styles.businessName, { color: isDark ? '#f0f6f1' : '#26382b' }]}>
                         {ad.businessName}
                       </Text>
-                      <Text numberOfLines={2} style={styles.bannerTitle}>
+                      <Text numberOfLines={2} style={[styles.bannerTitle, { color: isDark ? '#e0e9e1' : '#58655b' }]}>
                         {ad.title}
                       </Text>
-                      <Text numberOfLines={2} style={styles.bannerDescription}>
+                      <Text numberOfLines={2} style={[styles.bannerDescription, { color: isDark ? '#d7e2d9' : '#465249' }]}>
                         {ad.description}
                       </Text>
                     </View>
@@ -268,14 +317,14 @@ export default function HomeDashboard({ navigation }) {
           <Dialog
             visible={!!selectedAd}
             onDismiss={() => setSelectedAd(null)}
-            style={styles.detailDialog}
+            style={[styles.detailDialog, { backgroundColor: palette.surface }]}
           >
-            {selectedAd?.imageUrl && isValidHttpUrl(selectedAd.imageUrl) ? (
+            {normalizeAdvertImageUrl(selectedAd?.imageUrl) ? (
               failedAdImages[`${selectedAd.id}:${selectedAd.imageUrl}`] ? (
-                <View style={styles.detailImageFallback}><Text style={styles.bannerDescription}>Advert image unavailable.</Text></View>
+                <View style={[styles.detailImageFallback, { backgroundColor: palette.surfaceAlt }]}><Text style={[styles.bannerDescription, { color: palette.textMuted }]}>Advert image unavailable.</Text></View>
               ) : (
                 <Image
-                  source={{ uri: selectedAd.imageUrl }}
+                  source={{ uri: normalizeAdvertImageUrl(selectedAd.imageUrl) }}
                   style={styles.detailImage}
                   resizeMode="cover"
                   onError={() => setFailedAdImages((current) => ({ ...current, [`${selectedAd.id}:${selectedAd.imageUrl}`]: true }))}
@@ -283,12 +332,12 @@ export default function HomeDashboard({ navigation }) {
               )
             ) : null}
             <Dialog.Content>
-              <Text style={styles.adDialogLabel}>Advertisement</Text>
-              <Text style={styles.detailBusiness}>
+              <Text style={[styles.adDialogLabel, { color: palette.textMuted }]}>Advertisement</Text>
+              <Text style={[styles.detailBusiness, { color: palette.text }]}>
                 {selectedAd?.businessName}
               </Text>
-              <Text style={styles.detailTitle}>{selectedAd?.title}</Text>
-              <Text style={styles.detailDescription}>
+              <Text style={[styles.detailTitle, { color: palette.textMuted }]}>{selectedAd?.title}</Text>
+              <Text style={[styles.detailDescription, { color: palette.text }]}>
                 {selectedAd?.description}
               </Text>
             </Dialog.Content>
@@ -334,8 +383,22 @@ const styles = StyleSheet.create({
     color: "#526557",
     fontSize: 12,
     fontWeight: "700",
-    marginBottom: 12,
+    marginBottom: 4,
   },
+  workspaceCaption: { color: "#758078", fontSize: 11, marginBottom: 12 },
+  periodPicker: { flexDirection: 'row', alignItems: 'center', padding: 3, borderRadius: 13, marginBottom: 14, gap: 3 },
+  periodButton: { flex: 1, minHeight: 34, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, paddingVertical: 7, borderRadius: 10 },
+  periodButtonText: { fontSize: 11, fontWeight: '700' },
+  activityHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12, marginTop: 13, marginBottom: 4 },
+  activityTitle: { fontSize: 13, fontWeight: '800' },
+  activityCount: { fontSize: 10 },
+  activityRow: { flexDirection: 'row', alignItems: 'center', gap: 9, minHeight: 45, paddingVertical: 5 },
+  activityIcon: { width: 31, height: 31, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  activityTextBox: { flex: 1, minWidth: 0 },
+  activityName: { fontSize: 12, fontWeight: '600' },
+  activityMeta: { fontSize: 10, marginTop: 2 },
+  activityAmount: { maxWidth: '37%', fontSize: 11, fontWeight: '700', textAlign: 'right' },
+  emptyActivity: { fontSize: 11, paddingVertical: 11 },
   metrics: { flexDirection: "row", justifyContent: "space-between" },
   metric: { flex: 1, paddingRight: 4 },
   metricCaption: { fontSize: 11, color: "#758078", marginBottom: 5 },
@@ -371,7 +434,7 @@ const styles = StyleSheet.create({
   },
   bannerImageBackground: { flex: 1, justifyContent: "flex-end" },
   bannerImage: StyleSheet.absoluteFillObject,
-  bannerShade: { padding: 16, backgroundColor: "rgba(255, 255, 255, 0.84)" },
+  bannerShade: { padding: 16, backgroundColor: "rgba(255, 255, 255, 0.46)" },
   businessName: {
     color: "#26382b",
     fontSize: 22,
@@ -387,7 +450,7 @@ const styles = StyleSheet.create({
   bannerDescription: { color: "#465249", fontSize: 13, lineHeight: 19 },
   bannerFallback: { flex: 1, justifyContent: "center", padding: 20, backgroundColor: "#e8eee9" },
   detailDialog: { borderRadius: 20, overflow: "hidden" },
-  detailImage: { width: "100%", height: 190 },
+  detailImage: { width: "100%", height: 190, backgroundColor: '#e7e9e6' },
   detailImageFallback: { width: "100%", height: 190, alignItems: "center", justifyContent: "center", backgroundColor: "#e8eee9" },
   adLabel: {
   position: "absolute",

@@ -28,7 +28,8 @@ import {
   contentWidthStyle,
   isUsableLocalImage,
 } from "../utils/appUtils";
-import TermsOfServiceButton from "../components/TermsOfServiceButton";
+import { userFacingError } from "../utils/userFacingErrors";
+import { ThemeContext } from '../ThemeContext';
 
 const emptyDetails = {
   legalName: "",
@@ -64,6 +65,7 @@ const detailLabels = {
 };
 
 export default function WorkspacesScreen({ navigation }) {
+  const { palette, isDark } = useContext(ThemeContext);
   const {
     user,
     memberships,
@@ -76,6 +78,8 @@ export default function WorkspacesScreen({ navigation }) {
     getMembers,
     changeMemberRole,
     removeMember,
+    transferWorkspaceOwnership,
+    deleteWorkspace,
     isDeveloper,
     developerAccessInfo,
     updateWorkspacePhoto,
@@ -118,7 +122,8 @@ export default function WorkspacesScreen({ navigation }) {
     try {
       setMembers(await getMembers(current.id));
     } catch (error) {
-      Alert.alert("Could not load members", error.message);
+      const needsIndexUpdate = /index|collection[_ -]?group/i.test(String(error?.message || '')) || (String(error?.code || '').toLowerCase().includes('failed-precondition') && /index/i.test(String(error?.message || '')));
+      Alert.alert(needsIndexUpdate ? "Workspace database setup needed" : "Could not load members", userFacingError(error, "We could not load workspace members. Check your connection and try again."));
     }
   }, [current?.id, current?.role, getMembers]);
 
@@ -129,12 +134,13 @@ export default function WorkspacesScreen({ navigation }) {
   const perform = async (action, success) => {
     setBusy(true);
     try {
-      await action();
-      if (success) Alert.alert("Done", success);
+      const result = await action();
+      const message = typeof success === "function" ? success(result) : success;
+      if (message) Alert.alert("Done", message);
     } catch (error) {
       Alert.alert(
         "Could not complete action",
-        error.message || "Check your connection and try again.",
+        userFacingError(error, "Check your connection and try again."),
       );
     } finally {
       setBusy(false);
@@ -191,29 +197,28 @@ export default function WorkspacesScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.safeArea}>
+    <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: palette.header }]} >
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        <View style={styles.pageHeader}>
-          <Title style={styles.title}>Personal & organisations</Title>
+        <View style={[styles.pageHeader, { backgroundColor: palette.header }]} >
+          <Title style={[styles.title, { color: palette.headerText }]}>Personal & organisations</Title>
         </View>
         <ScrollView
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[styles.container, { backgroundColor: palette.background }]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
-          <TermsOfServiceButton style={styles.termsButton} />
           {!!invitations?.length && (
-            <Card style={styles.card}>
+            <Card style={[styles.card, { backgroundColor: palette.surface }]} >
               <Card.Title title="Organisation invitations" />
               <Card.Content>
                 {invitations.map((invitation) => (
                   <View key={invitation.id} style={styles.member}>
                     <View style={styles.memberInfo}>
                       <Text>{invitation.organizationName}</Text>
-                      <Text style={styles.copy}>
+                      <Text style={[styles.copy, { color: palette.textMuted }]}>
                         Invited as {invitation.role}
                       </Text>
                     </View>
@@ -234,7 +239,7 @@ export default function WorkspacesScreen({ navigation }) {
               </Card.Content>
             </Card>
           )}
-          <Card style={styles.card}>
+          <Card style={[styles.card, { backgroundColor: palette.surface }]} >
             <Card.Title title="Your workspaces" />
             <Card.Content>
               {[
@@ -264,14 +269,14 @@ export default function WorkspacesScreen({ navigation }) {
                 </View>
               ))}
               {!memberships.some((m) => m.status === "active") && (
-                <Text style={styles.copy}>
+                <Text style={[styles.copy, { color: palette.textMuted }]}>
                   You haven’t joined an organisation yet.
                 </Text>
               )}
             </Card.Content>
           </Card>
           {isDeveloper && (
-            <Card style={styles.card}>
+            <Card style={[styles.card, { backgroundColor: palette.surface }]} >
               <Card.Title
                 title="Developer Studio"
                 subtitle="Manage adverts shown across the app."
@@ -288,23 +293,17 @@ export default function WorkspacesScreen({ navigation }) {
             </Card>
           )}
           {!!developerAccessInfo?.error && (
-            <Card style={styles.card}>
+            <Card style={[styles.card, { backgroundColor: palette.surface }]} >
               <Card.Title title="Workspace profile unavailable" />
               <Card.Content>
-                <Text style={styles.copy}>
-                  The app could not read this account’s profile. Check the
-                  Firestore `users` document and deployed rules, then reopen
-                  Workspaces.
+                <Text style={[styles.copy, { color: palette.textMuted }]}>
+                  We could not load this account’s workspace profile. Check your connection and try again. If the problem continues, contact support.
                 </Text>
-                <Text selectable style={styles.diagnostic}>
-                  UID: {developerAccessInfo.uid}
-                  {"\n"}
-                  {developerAccessInfo.error}
-                </Text>
+                
               </Card.Content>
             </Card>
           )}
-          <Card style={styles.card}>
+          <Card style={[styles.card, { backgroundColor: palette.surface }]} >
             <Card.Content>
               <Button
                 mode="outlined"
@@ -321,7 +320,7 @@ export default function WorkspacesScreen({ navigation }) {
                     label="Company or organisation name"
                     value={name}
                     onChangeText={setName}
-                    style={styles.input}
+                    style={[styles.input, { backgroundColor: palette.input }]}
                   />
                   {Object.keys(emptyDetails).map((key) => (
                     <TextInput
@@ -331,7 +330,7 @@ export default function WorkspacesScreen({ navigation }) {
                       onChangeText={(value) =>
                         setNewDetails((item) => ({ ...item, [key]: value }))
                       }
-                      style={styles.input}
+                      style={[styles.input, { backgroundColor: palette.input }]}
                     />
                   ))}
                   <RadioButton.Group value={type} onValueChange={setType}>
@@ -361,7 +360,7 @@ export default function WorkspacesScreen({ navigation }) {
             </Card.Content>
           </Card>
           {user && activeWorkspace?.id === "personal" && (
-            <Card style={styles.card}>
+            <Card style={[styles.card, { backgroundColor: palette.surface }]} >
               <Card.Title
                 title="Personal workspace invoice details"
                 subtitle="Used when you create an invoice from your personal workspace."
@@ -378,7 +377,7 @@ export default function WorkspacesScreen({ navigation }) {
                         [key]: value,
                       }))
                     }
-                    style={styles.input}
+                    style={[styles.input, { backgroundColor: palette.input }]}
                   />
                 ))}
                 <Button
@@ -399,7 +398,7 @@ export default function WorkspacesScreen({ navigation }) {
             </Card>
           )}
           {current && (
-            <Card style={styles.card}>
+            <Card style={[styles.card, { backgroundColor: palette.surface }]} >
               <Card.Title
                 title="Organisation profile"
                 subtitle={current.name}
@@ -434,7 +433,7 @@ export default function WorkspacesScreen({ navigation }) {
                     onChangeText={(value) =>
                       setEditDetails((item) => ({ ...item, [key]: value }))
                     }
-                    style={styles.input}
+                    style={[styles.input, { backgroundColor: palette.input }]}
                   />
                 ))}
                 <Button
@@ -454,7 +453,7 @@ export default function WorkspacesScreen({ navigation }) {
             </Card>
           )}
           {current && (
-            <Card style={styles.card}>
+            <Card style={[styles.card, { backgroundColor: palette.surface }]} >
               <Card.Title
                 title={`Manage ${current.name}`}
                 subtitle={`Your role: ${current.role}`}
@@ -463,7 +462,7 @@ export default function WorkspacesScreen({ navigation }) {
                 {["owner", "admin"].includes(current.role) ? (
                   <>
                     <Text style={styles.section}>Add an existing user</Text>
-                    <Text style={styles.copy}>
+                    <Text style={[styles.copy, { color: palette.textMuted }]}>
                       The person must sign up first using this same email
                       address.
                     </Text>
@@ -476,7 +475,7 @@ export default function WorkspacesScreen({ navigation }) {
                       keyboardType="email-address"
                       returnKeyType="done"
                       blurOnSubmit
-                      style={styles.input}
+                      style={[styles.input, { backgroundColor: palette.input }]}
                     />
                     <RadioButton.Group
                       value={inviteRole}
@@ -512,7 +511,7 @@ export default function WorkspacesScreen({ navigation }) {
                               member.email ||
                               `Member ${member.id.slice(0, 6)}`}
                           </Text>
-                          <Text style={styles.copy}>
+                          <Text style={[styles.copy, { color: palette.textMuted }]}>
                             {member.email || member.id} · {member.role} ·{" "}
                             {member.status}
                           </Text>
@@ -530,14 +529,45 @@ export default function WorkspacesScreen({ navigation }) {
                       </View>
                     ))}
                     {!members.length && (
-                      <Text style={styles.copy}>No members to show yet.</Text>
+                      <Text style={[styles.copy, { color: palette.textMuted }]}>No members to show yet.</Text>
                     )}
                   </>
                 ) : (
-                  <Text style={styles.copy}>
+                  <Text style={[styles.copy, { color: palette.textMuted }]}>
                     Only an organisation owner or admin can invite members and
                     manage access.
                   </Text>
+                )}
+                {current.role === "owner" && (
+                  <View style={{ marginTop: 18, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e2e7e1", paddingTop: 14 }}>
+                    <Text style={styles.section}>Ownership and deletion</Text>
+                    <Text style={[styles.copy, { color: palette.textMuted }]}>
+                      Transfer ownership to another active member before leaving this organisation. Deleting the organisation permanently removes its cloud records and member access.
+                    </Text>
+                    <Button
+                      mode="outlined"
+                      textColor="#b3261e"
+                      disabled={busy}
+                      loading={busy}
+                      onPress={() => Alert.alert(
+                        "Delete this organisation?",
+                        `This permanently deletes ${current.name}, its cloud invitations and memberships, and any organisation records stored in Firestore. FinanceTracker keeps ledger records locally in this release, so this device's organisation records and image will be removed, but unsynced local copies on other devices may remain. This cannot be undone. Personal records outside this organisation are not deleted.`,
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "Delete organisation", style: "destructive", onPress: () => perform(async () => {
+                            const deletion = await deleteWorkspace(current.id);
+                            setSelectedId(null);
+                            setMembers([]);
+                            return deletion;
+                          }, (deletion) => deletion?.localCleanupComplete === false
+                            ? "The online organisation was deleted and your personal workspace is active, but some organisation files may remain on this device. Export your personal records, then contact support before clearing app storage."
+                            : "Organisation deleted. You are now in your personal workspace.") },
+                        ],
+                      )}
+                    >
+                      Delete organisation permanently
+                    </Button>
+                  </View>
                 )}
               </Card.Content>
             </Card>
@@ -558,7 +588,31 @@ export default function WorkspacesScreen({ navigation }) {
               </Dialog.Content>
               <Dialog.Actions>
                 <Button onPress={() => setSelectedId(null)}>Cancel</Button>
+                {current?.role === "owner" && (
+                  <Button
+                    textColor="#2f7040"
+                    disabled={busy}
+                    onPress={() => {
+                      const target = members.find((member) => member.id === selectedId);
+                      Alert.alert(
+                        "Transfer workspace ownership?",
+                        `Make ${target?.displayName || target?.email || "this member"} the owner? You will become an admin and can no longer delete the organisation unless ownership is transferred back.`,
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "Transfer ownership", onPress: () => perform(async () => {
+                            await transferWorkspaceOwnership(current.id, selectedId);
+                            setSelectedId(null);
+                            await refreshMembers();
+                          }, "Workspace ownership transferred. Your role is now admin.") },
+                        ],
+                      );
+                    }}
+                  >
+                    Make owner
+                  </Button>
+                )}
                 <Button
+                  disabled={busy}
                   onPress={() =>
                     perform(async () => {
                       await changeMemberRole(current.id, selectedId, "viewer");
@@ -570,6 +624,7 @@ export default function WorkspacesScreen({ navigation }) {
                   Make viewer
                 </Button>
                 <Button
+                  disabled={busy}
                   onPress={() =>
                     perform(async () => {
                       await changeMemberRole(current.id, selectedId, "editor");
@@ -582,6 +637,7 @@ export default function WorkspacesScreen({ navigation }) {
                 </Button>
                 <Button
                   textColor="#b3261e"
+                  disabled={busy}
                   onPress={() =>
                     perform(async () => {
                       await removeMember(current.id, selectedId);
@@ -627,7 +683,6 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   input: { backgroundColor: "#f7f9f6", marginVertical: 8 },
-  termsButton: { marginBottom: 14 },
   workspaceButton: { marginBottom: 8, borderRadius: 22 },
   workspaceBlock: { marginBottom: 4 },
   section: {

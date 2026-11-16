@@ -1,6 +1,7 @@
 const RATE_API_URL = 'https://open.er-api.com/v6/latest/USD';
 const FRESH_RATE_AGE_MS = 12 * 60 * 60 * 1000;
 const MAX_RATE_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_STALE_OFFLINE_RATE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const pendingRates = new Map();
 
 const cacheKey = (baseCurrencyCode, targetCurrencyCode) =>
@@ -59,7 +60,7 @@ const getExchangeRate = async (baseCurrencyCode, targetCurrencyCode, options = {
   const base = String(baseCurrencyCode || '').toUpperCase();
   const target = String(targetCurrencyCode || '').toUpperCase();
   if (!base || !target) throw new Error('Both currencies are required for conversion.');
-  if (base === target) return { baseCurrencyCode: base, targetCurrencyCode: target, rate: 1, timestamp: new Date(options.now ? options.now() : Date.now()).toISOString() };
+  if (base === target) return { baseCurrencyCode: base, targetCurrencyCode: target, rate: 1, timestamp: new Date(options.now ? options.now() : Date.now()).toISOString(), isStale: false };
 
   const storage = options.storage || require('@react-native-async-storage/async-storage').default;
   const fetchImpl = options.fetchImpl || fetch;
@@ -71,7 +72,7 @@ const getExchangeRate = async (baseCurrencyCode, targetCurrencyCode, options = {
     const cachedAge = cached ? now() - Date.parse(cached.cachedAt || cached.timestamp) : Infinity;
     const cachedQuoteAge = cached ? now() - Date.parse(cached.timestamp) : Infinity;
     const quoteWithinLimit = cachedQuoteAge >= 0 && cachedQuoteAge <= MAX_RATE_AGE_MS;
-    if (cached && cachedAge >= 0 && cachedAge <= FRESH_RATE_AGE_MS && quoteWithinLimit) return cached;
+    if (cached && cachedAge >= 0 && cachedAge <= FRESH_RATE_AGE_MS && quoteWithinLimit) return { ...cached, isStale: false };
 
     try {
       const quote = await fetchUsdRates(fetchImpl);
@@ -81,6 +82,7 @@ const getExchangeRate = async (baseCurrencyCode, targetCurrencyCode, options = {
         rate: calculateExchangeRate(quote.rates, base, target),
         timestamp: quote.timestamp,
         cachedAt: new Date(now()).toISOString(),
+        isStale: false,
       };
       const quoteAge = now() - Date.parse(record.timestamp);
       if (!Number.isFinite(quoteAge) || quoteAge < 0 || quoteAge > MAX_RATE_AGE_MS) {
@@ -89,8 +91,12 @@ const getExchangeRate = async (baseCurrencyCode, targetCurrencyCode, options = {
       await writeCachedRate(record, storage);
       return record;
     } catch (error) {
-      if (cached && cachedAge >= 0 && cachedAge <= MAX_RATE_AGE_MS && quoteWithinLimit) return cached;
-      throw new Error(`Currency conversion is temporarily unavailable for ${base} to ${target}. Connect to the internet and try again. ${error?.message || ''}`.trim());
+      const canUseStaleQuote = options.allowStaleOffline !== false
+        && cached
+        && cachedQuoteAge >= 0
+        && cachedQuoteAge <= MAX_STALE_OFFLINE_RATE_AGE_MS;
+      if (canUseStaleQuote) return { ...cached, isStale: true };
+      throw new Error(`Currency conversion is temporarily unavailable for ${base} to ${target}. Connect to the internet to obtain a current exchange rate. ${error?.message || ''}`.trim());
     }
   })();
   pendingRates.set(key, request);

@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
 import { Alert, Linking, ScrollView, StyleSheet, View, KeyboardAvoidingView, Platform } from 'react-native';
 import { Button, Card, List, Text, TextInput, Title } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { contentWidthStyle } from '../utils/appUtils';
+import { ThemeContext } from '../ThemeContext';
 
 const SUPPORT_EMAIL = 'syndicatearchives@gmail.com';
 const faqs = [
@@ -44,6 +45,7 @@ const faqs = [
 ];
 
 export default function HelpCentreScreen() {
+  const { palette } = useContext(ThemeContext);
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const filteredFaqs = useMemo(() => {
@@ -54,7 +56,7 @@ export default function HelpCentreScreen() {
 
   const contactSupport = async () => {
     const subject = encodeURIComponent('FinanceTracker support request');
-    const body = encodeURIComponent('Please describe your question or issue:\n\n\nApp version: 1.0.0');
+    const body = encodeURIComponent('Please describe your question or issue:\n\n\nApp version: 1.0.4');
     try {
       await Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`);
     } catch {
@@ -62,11 +64,11 @@ export default function HelpCentreScreen() {
     }
   };
 
-  return <SafeAreaView edges={['top']} style={styles.safeArea}>
+  return <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: palette.header }]}>
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.pageHeader}><Title style={styles.title}>Help Centre</Title></View>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-        <Text style={styles.intro}>Search common questions or contact our support team.</Text>
+      <View style={[styles.pageHeader, { backgroundColor: palette.header }]}><Title style={[styles.title, { color: palette.headerText }]}>Help Centre</Title></View>
+      <ScrollView style={{ backgroundColor: palette.background }} contentContainerStyle={[styles.container, { backgroundColor: palette.background }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+        <Text style={[styles.intro, { color: palette.textMuted }]}>Search common questions or contact our support team.</Text>
         <TextInput
           label="Search help"
           value={search}
@@ -74,9 +76,9 @@ export default function HelpCentreScreen() {
           mode="outlined"
           left={<TextInput.Icon icon="magnify" />}
           clearButtonMode="while-editing"
-          style={styles.search}
+          style={[styles.search, { backgroundColor: palette.surface }]}
         />
-        <Card style={styles.card}>
+        <Card style={[styles.card, { backgroundColor: palette.surface }]}>
           <Card.Title title="Frequently asked questions" />
           {filteredFaqs.map(({ id, question, answer }) => <List.Accordion
             key={id}
@@ -84,17 +86,17 @@ export default function HelpCentreScreen() {
             expanded={expandedId === id}
             onPress={() => setExpandedId((current) => current === id ? null : id)}
             titleNumberOfLines={3}
-            style={styles.accordion}
+            style={[styles.accordion, { backgroundColor: palette.surface }]}
           >
-            <Text style={styles.answer}>{answer}</Text>
+            <Text style={[styles.answer, { color: palette.text }] }>{answer}</Text>
           </List.Accordion>)}
-          {!filteredFaqs.length && <Card.Content><Text style={styles.empty}>No matching questions. Try another search or contact support.</Text></Card.Content>}
+          {!filteredFaqs.length && <Card.Content><Text style={[styles.empty, { color: palette.textMuted }]}>No matching questions. Try another search or contact support.</Text></Card.Content>}
         </Card>
-        <Card style={styles.card}>
+        <Card style={[styles.card, { backgroundColor: palette.surface }]}>
           <Card.Title title="Still need help?" subtitle="Email our support team and tell us how we can help." />
           <Card.Content>
             <Button mode="contained" icon="email-outline" onPress={contactSupport}>Contact support</Button>
-            <Text selectable style={styles.email}>{SUPPORT_EMAIL}</Text>
+            <Text selectable style={[styles.email, { color: palette.textMuted }]}>{SUPPORT_EMAIL}</Text>
           </Card.Content>
         </Card>
       </ScrollView>

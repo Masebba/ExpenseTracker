@@ -5,7 +5,8 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app as firebaseApp } from '../firebase';
 import { AuthContext } from '../AuthContext';
 import { AppFeaturesContext } from '../AppFeaturesContext';
-import { contentWidthStyle, isValidHttpUrl } from '../utils/appUtils';
+import { contentWidthStyle, isValidHttpsUrl, normalizeAdvertImageUrl } from '../utils/appUtils';
+import { userFacingError } from '../utils/userFacingErrors';
 import {
   DEFAULT_TERMS_OF_SERVICE,
   publishTermsOfService,
@@ -27,6 +28,7 @@ export default function DeveloperStudioScreen({ navigation }) {
   const [imageUrl, setImageUrl] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewFailed, setPreviewFailed] = useState(false);
+  const [previewLoaded, setPreviewLoaded] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [editing, setEditing] = useState(null);
   const [startsAt, setStartsAt] = useState('');
@@ -52,8 +54,9 @@ export default function DeveloperStudioScreen({ navigation }) {
     } catch (error) {
       setCounts(null);
       setCountsError(error?.code === 'functions/not-found'
-        ? 'Adoption reporting is not deployed for this Firebase project yet. Run firebase deploy --only functions.'
-        : error?.message || 'Could not read adoption counts.');
+        ? 'Adoption reporting is not available yet. Please contact the app administrator.'
+        : userFacingError(error, 'Could not load adoption totals. Check your connection and try again.'));
+      console.warn('[Developer Studio] Adoption totals failed:', error?.code || 'unknown', error?.message || error);
     } finally { setLoadingCounts(false); }
   };
 
@@ -68,7 +71,7 @@ export default function DeveloperStudioScreen({ navigation }) {
         setTermsError('');
         setTermsLoaded(true);
       },
-      (error) => setTermsError(error?.message || 'Could not load the current terms.'),
+      (error) => setTermsError(userFacingError(error, 'Could not load the current terms. Check your connection and try again.')),
     );
   }, [isDeveloper]);
 
@@ -80,23 +83,26 @@ export default function DeveloperStudioScreen({ navigation }) {
 
   useEffect(() => {
     setPreviewFailed(false);
+    setPreviewLoaded(false);
     setPreviewUrl('');
-    const cleanUrl = imageUrl.trim();
-    if (!isValidHttpUrl(cleanUrl)) return undefined;
+    const cleanUrl = normalizeAdvertImageUrl(imageUrl);
+    if (!cleanUrl) return undefined;
     const timer = setTimeout(() => setPreviewUrl(cleanUrl), 350);
     return () => clearTimeout(timer);
   }, [imageUrl]);
 
   const publish = async () => {
     if (startsAt && endsAt && startsAt > endsAt) { Alert.alert('Check advert dates', 'The stop date must be the same as or later than the start date.'); return; }
-    if (imageUrl.trim() && !isValidHttpUrl(imageUrl)) { Alert.alert('Invalid image URL', 'Enter a valid HTTP or HTTPS image URL.'); return; }
+    const normalizedImageUrl = normalizeAdvertImageUrl(imageUrl);
+    if (imageUrl.trim() && (!normalizedImageUrl || !isValidHttpsUrl(normalizedImageUrl))) { Alert.alert('Check advert image', 'Use a direct, publicly accessible HTTPS image URL. Public Google Drive and Dropbox links are converted when possible.'); return; }
+    if (imageUrl.trim() && (previewUrl !== normalizedImageUrl || !previewLoaded || previewFailed)) { Alert.alert('Check advert image', 'The current image link has not loaded successfully. Wait for its preview, or use a direct public HTTPS image link.'); return; }
     setBusy(true);
     try {
-      const data = { title, businessName: business, description, imageUrl: imageUrl.trim(), linkUrl, startsAt, endsAt };
+      const data = { title, businessName: business, description, imageUrl: normalizedImageUrl, linkUrl, startsAt, endsAt };
       if (editing) await updateAd(editing, data); else await addAd(data);
       resetForm();
       Alert.alert(editing ? 'Advert updated' : 'Published', 'Your advert schedule has been saved.');
-    } catch (error) { Alert.alert('Could not publish advert', error.message || 'Try again.'); }
+    } catch (error) { Alert.alert('Could not publish advert', userFacingError(error, 'The advert could not be saved. Check your connection and try again.')); }
     finally { setBusy(false); }
   };
 
@@ -107,13 +113,13 @@ export default function DeveloperStudioScreen({ navigation }) {
       await publishTermsOfService(termsBody, user?.uid);
       Alert.alert('Terms published', 'Users will see the updated terms in the app.');
     } catch (error) {
-      setTermsError(error.message || 'Could not publish the terms.');
+      setTermsError(userFacingError(error, 'Could not publish the terms. Check your connection and try again.'));
     } finally {
       setSavingTerms(false);
     }
   };
 
-  const resetForm = () => { setTitle(''); setBusiness(''); setDescription(''); setImageUrl(''); setPreviewUrl(''); setPreviewFailed(false); setLinkUrl(''); setEditing(null); setStartsAt(''); setEndsAt(''); };
+  const resetForm = () => { setTitle(''); setBusiness(''); setDescription(''); setImageUrl(''); setPreviewUrl(''); setPreviewFailed(false); setPreviewLoaded(false); setLinkUrl(''); setEditing(null); setStartsAt(''); setEndsAt(''); };
   const openDatePicker = (field) => {
     const current = parseDate(field === 'start' ? startsAt : endsAt || startsAt);
     setCalendarMonth(new Date(current.getFullYear(), current.getMonth(), 1));
@@ -133,7 +139,7 @@ export default function DeveloperStudioScreen({ navigation }) {
   if (!isDeveloper) return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}><View style={styles.pageHeader}><Title style={styles.title}>Unavailable</Title></View><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
     <Card style={styles.card}><Card.Content>
       <Text style={styles.copy}>This page is unavailable for this account.</Text>
-      {access?.error ? <Text selectable style={styles.diagnostic}>Could not read Firestore profile: {access.error}</Text> : access ? <Text selectable style={styles.diagnostic}>Signed in UID: {access.uid}{access.email ? `\nEmail: ${access.email}` : ''}{`\nFirestore users/${access.uid}/developerAdmin: ${JSON.stringify(access.developerAdmin)}`}</Text> : <Text style={styles.copy}>Checking account access…</Text>}
+      {access?.error ? <Text style={styles.copy}>We could not verify administrator access. Check your connection and try again. If this continues, contact support.</Text> : access ? <Text selectable style={styles.diagnostic}>Signed in account: {access.email || 'Email unavailable'}{`\nAdministrator access: ${access.developerAdmin ? 'Enabled' : 'Not enabled'}`}</Text> : <Text style={styles.copy}>Checking account access…</Text>}
       <Button mode="outlined" loading={busy} onPress={async () => { setBusy(true); try { setAccess(await refreshDeveloperAccess()); } finally { setBusy(false); } }}>Check access</Button>
     </Card.Content></Card>
   </ScrollView></KeyboardAvoidingView>;
@@ -148,18 +154,18 @@ export default function DeveloperStudioScreen({ navigation }) {
       <TextInput label="Banner headline (optional)" value={title} onChangeText={setTitle} style={styles.input} />
       <TextInput label="Advert details" value={description} onChangeText={setDescription} multiline numberOfLines={5} textAlignVertical="top" style={styles.multiline} />
       <TextInput label="Advert Image URL (optional)" value={imageUrl} onChangeText={setImageUrl} placeholder="https://res.cloudinary.com/..." autoCapitalize="none" autoCorrect={false} keyboardType="url" style={styles.input} />
-      <Text style={styles.copy}>Paste a publicly accessible image URL. Recommended: JPG, PNG or WebP.</Text>
+      <Text style={styles.copy}>Use a public HTTPS image URL that serves the actual image file. Public Google Drive and Dropbox file-sharing links are converted when possible. Webpages and private files will not display. Wait for the preview to load before publishing.</Text>
       <View style={styles.preview}>
-        {previewUrl && previewUrl === imageUrl.trim() && !previewFailed
-          ? <Image key={previewUrl} source={{ uri: previewUrl }} style={styles.previewImage} resizeMode="cover" onError={() => setPreviewFailed(true)} />
-          : <Text style={styles.previewMessage}>{previewFailed ? 'Unable to load image. Check that the URL is publicly accessible.' : imageUrl.trim() && !isValidHttpUrl(imageUrl) ? 'Enter a valid HTTP or HTTPS image URL to preview.' : imageUrl.trim() ? 'Loading image preview…' : 'Image preview will appear here.'}</Text>}
+        {previewUrl && previewUrl === normalizeAdvertImageUrl(imageUrl) && !previewFailed
+          ? <Image key={previewUrl} source={{ uri: previewUrl }} style={styles.previewImage} resizeMode="cover" onLoad={() => { setPreviewLoaded(true); setPreviewFailed(false); }} onError={() => { setPreviewLoaded(false); setPreviewFailed(true); }} />
+          : <Text style={styles.previewMessage}>{previewFailed ? 'Image could not be loaded. Check that the link opens the image file publicly without signing in. For dependable display, use a direct JPG, PNG or WebP URL.' : imageUrl.trim() && !isValidHttpsUrl(normalizeAdvertImageUrl(imageUrl)) ? 'Enter a public HTTPS image URL. Public Google Drive and Dropbox links are converted when possible.' : imageUrl.trim() ? 'Loading image preview…' : 'Image preview will appear here.'}</Text>}
       </View>
       <TextInput label="Business link (optional)" value={linkUrl} onChangeText={setLinkUrl} autoCapitalize="none" style={styles.input} />
       <Text style={styles.dateLabel}>Schedule (optional)</Text>
       <View style={styles.dateRow}><View style={styles.dateField}><Text style={styles.dateCaption}>Starts</Text><Button compact mode="outlined" icon="calendar-month-outline" onPress={()=>openDatePicker('start')}>{startsAt || 'Choose date'}</Button></View>{!!startsAt && <IconButton icon="close-circle-outline" size={18} onPress={()=>{setStartsAt('');setEndsAt('');}}/>}</View>
       <View style={styles.dateRow}><View style={styles.dateField}><Text style={styles.dateCaption}>Ends</Text><Button compact mode="outlined" icon="calendar-month-outline" disabled={!startsAt} onPress={()=>openDatePicker('end')}>{endsAt || (startsAt?'Choose date':'Choose a start date first')}</Button></View>{!!endsAt && <IconButton icon="close-circle-outline" size={18} onPress={()=>setEndsAt('')}/>}</View>
       {!!editing && <Button compact onPress={resetForm}>Cancel editing</Button>}
-      <Button mode="contained" loading={busy} disabled={busy || (!title.trim() && !business.trim())} onPress={publish}>{editing?'Save changes':'Publish advert'}</Button>
+      <Button mode="contained" loading={busy} disabled={busy || (!title.trim() && !business.trim()) || (!!imageUrl.trim() && (previewUrl !== normalizeAdvertImageUrl(imageUrl) || !previewLoaded || previewFailed))} onPress={publish}>{editing?'Save changes':'Publish advert'}</Button>
     </Card.Content></Card>
     <Card style={styles.card}><Card.Title title="Adoption" subtitle="Aggregate counts only. No account details or record contents are read." /><Card.Content>
       {!!countsError && <Text style={styles.diagnostic}>{countsError}</Text>}

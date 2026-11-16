@@ -10,12 +10,16 @@ import {
   contentWidthStyle,
 } from "../utils/appUtils";
 import { SafeAreaView } from "react-native-safe-area-context";
+import CompactFilterMenu from "../components/CompactFilterMenu";
+import CompactSearch from "../components/CompactSearch";
+import { ThemeContext } from "../ThemeContext";
 
 const filters = ["daily", "weekly", "monthly", "all"];
 
 export default function TransactionsScreen({ navigation }) {
   const { transactions, clearTransactions } = useContext(TransactionsContext);
   const { currency } = useContext(CurrencyContext);
+  const { palette, isDark } = useContext(ThemeContext);
   const [filter, setFilter] = useState("daily");
   const [query, setQuery] = useState("");
   const filtered = useMemo(
@@ -35,41 +39,44 @@ export default function TransactionsScreen({ navigation }) {
   const confirmClear = () =>
     Alert.alert(
       "Clear transactions?",
-      "This permanently deletes every transaction in the current workspace, including its cloud-synced copy when sync is enabled.",
+      "This permanently deletes the manually recorded transactions in the current workspace. Trade-linked income must be removed by deleting the related sale in Trade. Financial ledgers are currently stored on this device.",
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Clear all", style: "destructive", onPress: clearTransactions },
+        { text: "Clear all", style: "destructive", onPress: async () => {
+          try { await clearTransactions(); }
+          catch (error) { Alert.alert("Could not clear transactions", error?.message || "Some transactions could not be cleared. Linked Trade income must be removed by deleting its sale."); }
+        } },
       ],
     );
 
   const renderItem = ({ item }) => {
     const positive = item.type === "income";
     return (
-      <Card style={styles.card}>
+      <Card style={[styles.card, { backgroundColor: palette.surface }]}>{/* theme-aware transaction card */}
         <Card.Content style={styles.item}>
           <View
             style={[
               styles.typeIcon,
-              { backgroundColor: positive ? "#e5f2e9" : "#f9e9e5" },
+              { backgroundColor: palette.surfaceAlt },
             ]}
           >
             <Text
-              style={{ color: positive ? "#277746" : "#b54534", fontSize: 18 }}
+              style={{ color: positive ? palette.income : palette.expense, fontSize: 18 }}
             >
               {positive ? "↙" : "↗"}
             </Text>
           </View>
           <View style={styles.details}>
-            <Text style={styles.description}>
+            <Text style={[styles.description, { color: palette.text }]} >
               {item.description ||
                 item.category ||
                 (positive ? "Income" : "Expense")}
             </Text>
-            <Text style={styles.meta}>
+            <Text style={[styles.meta, { color: palette.textMuted }]} >
               {item.category || "Uncategorized"} · {new Date(item.timestamp).toLocaleString()}
             </Text>
             {item.baseAmount !== undefined && item.baseCurrencyCode && item.baseCurrencyCode !== (item.currencyCode || item.currency) && (
-              <Text style={styles.conversionMeta}>
+              <Text style={[styles.conversionMeta, { color: palette.textMuted }]} >
                 Recorded reporting value: {formatMoney(item.baseAmount, currencyFromCode(item.baseCurrencyCode))}
                 {Number.isFinite(Number(item.exchangeRate)) ? ` · Rate ${Number(item.exchangeRate).toLocaleString(undefined, { maximumFractionDigits: 8 })}` : ''}
                 {item.exchangeRateTimestamp ? ` · ${new Date(item.exchangeRateTimestamp).toLocaleString()}` : ''}
@@ -77,7 +84,7 @@ export default function TransactionsScreen({ navigation }) {
             )}
           </View>
           <Text
-            style={[styles.amount, { color: positive ? "#267a46" : "#bd4936" }]}
+            style={[styles.amount, { color: positive ? palette.income : palette.expense }]}
           >
             {positive ? "+" : "−"}
             {formatMoney(
@@ -91,41 +98,28 @@ export default function TransactionsScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.safeArea}>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Title style={styles.title}>Transactions</Title>
+    <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: palette.header }]}>
+      <View style={[styles.container, { backgroundColor: palette.background }]} >
+        <View style={[styles.header, { backgroundColor: palette.header, borderBottomColor: palette.border }]} >
+          <Title style={[styles.title, { color: palette.headerText }]}>Transactions</Title>
           <Button
             compact
-            textColor="#c42424"
+            textColor={palette.danger}
             onPress={confirmClear}
             disabled={!transactions.length}
           >
             Clear
           </Button>
         </View>
-        <View style={styles.filters}>
-          {filters.map((item) => (
-            <Button
-              key={item}
-              compact
-              mode={filter === item ? "contained" : "text"}
-              onPress={() => setFilter(item)}
-              style={styles.filterButton}
-            >
-              {item[0].toUpperCase() + item.slice(1)}
-            </Button>
-          ))}
+        <View style={styles.toolbar}>
+          <CompactFilterMenu value={filter} onChange={setFilter} label="Period" options={[
+            { value: "daily", label: "Today" },
+            { value: "weekly", label: "This week" },
+            { value: "monthly", label: "This month" },
+            { value: "all", label: "All time" },
+          ]} />
+          <CompactSearch value={query} onChangeText={setQuery} placeholder="Description, category or amount" accessibilityLabel="Search transactions" />
         </View>
-        <TextInput
-          dense
-          mode="outlined"
-          placeholder="Search description, category or amount"
-          value={query}
-          onChangeText={setQuery}
-          style={styles.search}
-          accessibilityLabel="Search transactions"
-        />
         <FlatList
           data={filtered}
           keyExtractor={(item) => item.id}
@@ -135,8 +129,8 @@ export default function TransactionsScreen({ navigation }) {
           }
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>{transactions.length ? 'No matching transactions' : 'Your transaction ledger is ready'}</Text>
-              <Text style={styles.empty}>{transactions.length ? 'Try another period or adjust your search.' : 'Record money received or spent here. Other business records, including products, customers, suppliers and invoices, are available from Home.'}</Text>
+              <Text style={[styles.emptyTitle, { color: palette.text }]} >{transactions.length ? 'No matching transactions' : 'Your transaction ledger is ready'}</Text>
+              <Text style={[styles.empty, { color: palette.textMuted }]} >{transactions.length ? 'Try another period or adjust your search.' : 'Record money received or spent here. Other business records, including products, customers, suppliers and invoices, are available from Home.'}</Text>
               {!transactions.length && <View style={styles.emptyActions}><Button mode="contained" onPress={() => navigation.navigate('Home', { screen: 'Income' })}>Record income</Button><Button mode="outlined" onPress={() => navigation.navigate('Home', { screen: 'Expense' })}>Record expense</Button></View>}
             </View>
           }
@@ -168,16 +162,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#2f7040",
   },
   title: { fontSize: 22, color: "#ffffff" },
-  filters: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    backgroundColor: "#e9eee8",
-    borderRadius: 16,
-    padding: 4,
-    marginBottom: 12,
-  },
-  filterButton: { flex: 1, marginHorizontal: 1 },
-  search: { marginBottom: 8, backgroundColor: "#fff" },
+  toolbar: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
   list: { paddingBottom: 16 },
   card: {
     marginVertical: 5,

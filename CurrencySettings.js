@@ -5,7 +5,7 @@ import { Title, Button, Menu, Text } from 'react-native-paper';
 import { CurrencyContext } from './CurrencyContext';
 
 export default function CurrencySettings() {
-    const { currency, changeCurrency } = useContext(CurrencyContext);
+    const { currency, setCurrencyCode } = useContext(CurrencyContext);
     const [menuVisible, setMenuVisible] = useState(false);
 
     // Array of currency options. Add more as needed.
@@ -42,7 +42,7 @@ export default function CurrencySettings() {
                     <Menu.Item
                         key={option.code}
                         onPress={() => {
-                            changeCurrency(option);
+                            setCurrencyCode(option.code);
                             setMenuVisible(false);
                         }}
                         title={`${option.country} (${option.symbol})`} style={styles.listcountry}

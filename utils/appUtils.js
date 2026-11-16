@@ -139,13 +139,48 @@ const TIME_ZONE_REGIONS = {
 };
 
 export const detectDeviceRegion = () => {
-  const locale = Intl.DateTimeFormat().resolvedOptions().locale || '';
+  // Time zone is a better regional signal than language alone. For example,
+  // an English-UG locale can remain set while a device is configured for Nairobi.
+  let timeZone = null;
+  let locale = '';
+  try {
+    const resolved = Intl.DateTimeFormat().resolvedOptions();
+    timeZone = resolved.timeZone || null;
+    locale = resolved.locale || '';
+  } catch { /* Fall through to the available locale or safe default. */ }
+  if (timeZone && TIME_ZONE_REGIONS[timeZone]) return TIME_ZONE_REGIONS[timeZone];
   const localeParts = locale.replace(/_/g, '-').split('-');
   const region = localeParts.slice(1).find((part) => /^[A-Za-z]{2}$/.test(part));
-  if (region) return region.toUpperCase();
+  return region ? region.toUpperCase() : null;
+};
 
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return TIME_ZONE_REGIONS[timeZone] || null;
+export const normalizeAdvertImageUrl = (value) => {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const cleaned = value.trim().replace(/[\u200B\uFEFF\r\n\t]/g, '');
+  try {
+    const url = new URL(cleaned);
+    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) return '';
+    const host = url.hostname.toLowerCase();
+    // Convert common sharing-page links into image/content endpoints when possible.
+    if (host === 'drive.google.com' || host === 'docs.google.com') {
+      const match = url.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+      const fileId = match?.[1] || url.searchParams.get('id');
+      if (fileId) return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`;
+    }
+    if (host === 'www.dropbox.com' || host === 'dropbox.com') {
+      url.hostname = 'www.dropbox.com';
+      if (url.searchParams.has('dl')) url.searchParams.delete('dl');
+      url.searchParams.set('raw', '1');
+    }
+    return url.toString();
+  } catch { return ''; }
+};
+
+export const isValidHttpsUrl = (value) => {
+  const normalized = normalizeAdvertImageUrl(value);
+  if (!normalized) return false;
+  try { const url = new URL(normalized); return url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password; }
+  catch { return false; }
 };
 
 export const currencyForRegion = (region) =>
@@ -213,11 +248,27 @@ export const formatCurrency = (amount, currencyCode = 'UGX', locale) => {
 export const formatMoney = (amount, currency = { code: 'UGX' }, locale) =>
   formatCurrency(amount, typeof currency === 'string' ? currency : currency?.code, locale);
 
-export const periodStartEnd = (period, now = new Date()) => {
+const localeWeekStart = () => {
+  try {
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    if (typeof Intl.Locale === 'function') {
+      const localeObject = new Intl.Locale(locale);
+      const info = typeof localeObject.getWeekInfo === 'function'
+        ? localeObject.getWeekInfo()
+        : localeObject.weekInfo;
+      if (Number.isInteger(info?.firstDay) && info.firstDay >= 1 && info.firstDay <= 7) return info.firstDay % 7;
+    }
+  } catch { /* Devices without Intl.Locale use Sunday as the safe fallback. */ }
+  return 0;
+};
+
+export const periodStartEnd = (period, now = new Date(), weekStartsOn = localeWeekStart()) => {
   const d = new Date(now);
   if (period === 'daily') return [new Date(d.getFullYear(), d.getMonth(), d.getDate()), new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)];
   if (period === 'weekly') {
-    const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay());
+    const normalizedFirstDay = ((Number(weekStartsOn) || 0) % 7 + 7) % 7;
+    const daysSinceWeekStart = (d.getDay() - normalizedFirstDay + 7) % 7;
+    const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - daysSinceWeekStart);
     return [start, new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7)];
   }
   if (period === 'monthly') return [new Date(d.getFullYear(), d.getMonth(), 1), new Date(d.getFullYear(), d.getMonth() + 1, 1)];
@@ -239,47 +290,351 @@ export const escapeHtml = (value) => String(value ?? '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#039;');
 
-export const loadJson = async (key, fallback) => {
+const mirrorFileForKey = (key) => {
+  const root = FileSystem.documentDirectory;
+  if (!root) return null;
+  return `${root}ExpenseTracker/${encodeURIComponent(key).replace(/%/g, '_')}.json`;
+};
+
+const writeMirrorValue = async (key, value) => {
+  const file = mirrorFileForKey(key);
+  if (!file) return false;
   try {
-    const raw = await AsyncStorage.getItem(key);
-    if (raw) return JSON.parse(raw);
-    const root = FileSystem.documentDirectory;
-    if (root) {
-      const file = `${root}ExpenseTracker/${encodeURIComponent(key).replace(/%/g, '_')}.json`;
-      const info = await FileSystem.getInfoAsync(file);
-      if (info.exists) {
-        const contents = await FileSystem.readAsStringAsync(file);
-        await AsyncStorage.setItem(key, contents);
-        return JSON.parse(contents);
-      }
+    await FileSystem.makeDirectoryAsync(`${FileSystem.documentDirectory}ExpenseTracker/`, { intermediates: true });
+    if (value == null) {
+      await FileSystem.deleteAsync(file, { idempotent: true });
+    } else {
+      const json = typeof value === 'string' ? value : JSON.stringify(value);
+      await FileSystem.writeAsStringAsync(file, json);
     }
-    return fallback;
-  } catch {
-    return fallback;
+    return true;
+  } catch (error) {
+    console.warn('[Storage] Private recovery mirror could not be updated:', error?.message || error);
+    return false;
   }
 };
 
-export const saveJson = async (key, value) => {
+const ownerFromStorageKey = (key) => {
+  // The manual override key is nested under `manual` and must never be
+  // mistaken for an account named `currency`.
+  if (key.startsWith('expenseTracker.currency.manual.')) return null;
+  const currencyOwner = key.match(/^expenseTracker\.currency\.([^.]+)$/)?.[1];
+  const scopedOwner = key.match(/^expenseTracker\.([^.]+)\./)?.[1];
+  const owner = currencyOwner || scopedOwner;
+  return owner && !['cloudSync', 'externalBackup'].includes(owner) ? owner : null;
+};
+
+const localOwnerWriteQueues = new Map();
+const enqueueLocalOwnerWork = async (ownerId, work) => {
+  if (!ownerId) return work();
+  const prior = localOwnerWriteQueues.get(ownerId) || Promise.resolve();
+  const current = prior.catch(() => undefined).then(work);
+  localOwnerWriteQueues.set(ownerId, current);
+  try { return await current; }
+  finally { if (localOwnerWriteQueues.get(ownerId) === current) localOwnerWriteQueues.delete(ownerId); }
+};
+
+// Call before reading a scoped ledger or producing a folder backup, so readers
+// cannot observe only one side of a multi-key transaction.
+export const waitForLocalOwnerWrites = async (ownerId) => {
+  const pending = ownerId ? localOwnerWriteQueues.get(ownerId) : null;
+  if (pending) { try { await pending; } catch { /* Recovery below checks the journal. */ } }
+};
+
+export const withLocalOwnerWriteLock = async (ownerId, operation) =>
+  enqueueLocalOwnerWork(ownerId, operation);
+
+const recoveredTransactionOwners = new Set();
+const pendingTransactionKey = (ownerId) => `expenseTracker.${ownerId}.pendingLocalTransaction`;
+
+// If the app was stopped between writes to related ledger keys, roll back to
+// the transaction's before-image before any affected dataset is hydrated.
+export const recoverPendingLocalTransaction = async (ownerId) => {
+  if (!ownerId || recoveredTransactionOwners.has(ownerId)) return;
+  const journalKey = pendingTransactionKey(ownerId);
   try {
-    const json = JSON.stringify(value);
-    await AsyncStorage.setItem(key, json);
-    const currencyOwner = key.match(/^expenseTracker\.currency\.([^.]+)$/)?.[1];
-    const scopedOwner = key.match(/^expenseTracker\.([^.]+)\./)?.[1];
-    const ownerId = currencyOwner || scopedOwner;
-    if (ownerId && !['cloudSync', 'externalBackup'].includes(ownerId)) {
-      import('../services/externalBackup').then(({ scheduleExternalBackup }) => scheduleExternalBackup(ownerId)).catch(() => {});
+    const raw = await AsyncStorage.getItem(journalKey);
+    if (!raw) {
+      recoveredTransactionOwners.add(ownerId);
+      return;
     }
-    const root = FileSystem.documentDirectory;
-    if (root) {
-      const directory = `${root}ExpenseTracker/`;
-      await FileSystem.makeDirectoryAsync(directory, { intermediates: true }).catch(() => {});
-      const safeName = encodeURIComponent(key).replace(/%/g, '_');
-      await FileSystem.writeAsStringAsync(`${directory}${safeName}.json`, json).catch(() => {});
+    const journal = JSON.parse(raw);
+    if (!Array.isArray(journal?.before) || !journal.before.every((entry) => Array.isArray(entry) && typeof entry[0] === 'string')) {
+      throw new Error('Local transaction recovery information is invalid.');
     }
-    return true;
-  } catch {
-    return false;
+    const restore = journal.before;
+    const toSet = restore.filter(([, value]) => value != null).map(([key, value]) => [key, String(value)]);
+    const toRemove = restore.filter(([, value]) => value == null).map(([key]) => key);
+    if (toSet.length) await AsyncStorage.multiSet(toSet);
+    if (toRemove.length) await AsyncStorage.multiRemove(toRemove);
+    for (const [key, value] of restore) await writeMirrorValue(key, value);
+    await AsyncStorage.removeItem(journalKey);
+    recoveredTransactionOwners.add(ownerId);
+    console.warn('[Storage] Recovered an interrupted local finance transaction.');
+  } catch (error) {
+    console.error('[Storage] Could not recover an interrupted local finance transaction:', error?.message || error);
+    throw new Error('Finance records need recovery. Close and reopen the app, then restore a backup if this message continues.');
   }
+};
+
+// Persist related local datasets as a single recoverable operation. AsyncStorage
+// has no multi-key transaction API, so a before-image journal makes interrupted
+// or partially failed writes recoverable on the next data hydration.
+const commitLocalJsonTransactionNow = async (ownerId, updates) => {
+  if (!ownerId || !Array.isArray(updates) || updates.length < 2) throw new Error('A valid local ledger transaction is required.');
+  await recoverPendingLocalTransaction(ownerId);
+  const keys = updates.map((item) => item?.key);
+  if (keys.some((key) => typeof key !== 'string' || (!key.startsWith(`expenseTracker.${ownerId}.`) && key !== `expenseTracker.currency.${ownerId}`))) {
+    throw new Error('The local transaction contains data outside the current account.');
+  }
+  if (new Set(keys).size !== keys.length || keys.includes(pendingTransactionKey(ownerId))) {
+    throw new Error('The local transaction contains duplicate or reserved keys.');
+  }
+  let serialized;
+  try {
+    serialized = updates.map(({ key, value }) => [key, value == null ? null : JSON.stringify(value)]);
+    if (serialized.some(([, value]) => value === undefined)) throw new Error('A finance record could not be serialized.');
+  } catch {
+    throw new Error('Finance records could not be prepared for saving. Check the data and try again.');
+  }
+  const before = await AsyncStorage.multiGet(keys);
+  const journal = JSON.stringify({ version: 1, startedAt: new Date().toISOString(), before });
+  await AsyncStorage.setItem(pendingTransactionKey(ownerId), journal);
+  try {
+    const toSet = serialized.filter(([, value]) => value != null);
+    const toRemove = serialized.filter(([, value]) => value == null).map(([key]) => key);
+    if (toSet.length) await AsyncStorage.multiSet(toSet);
+    if (toRemove.length) await AsyncStorage.multiRemove(toRemove);
+    for (const [key, value] of serialized) await writeMirrorValue(key, value);
+    await AsyncStorage.removeItem(pendingTransactionKey(ownerId));
+    recoveredTransactionOwners.add(ownerId);
+    try { const { scheduleExternalBackup } = await import('../services/externalBackup'); scheduleExternalBackup(ownerId); } catch { /* The primary local transaction is already durable. */ }
+    return true;
+  } catch (error) {
+    try {
+      const oldValues = before.filter(([, value]) => value != null).map(([key, value]) => [key, value]);
+      const oldKeys = before.filter(([, value]) => value == null).map(([key]) => key);
+      if (oldValues.length) await AsyncStorage.multiSet(oldValues);
+      if (oldKeys.length) await AsyncStorage.multiRemove(oldKeys);
+      for (const [key, value] of before) await writeMirrorValue(key, value);
+      await AsyncStorage.removeItem(pendingTransactionKey(ownerId));
+    } catch (rollbackError) {
+      recoveredTransactionOwners.delete(ownerId);
+      console.error('[Storage] Local finance transaction rollback needs recovery:', rollbackError?.message || rollbackError);
+      throw new Error('The change could not be saved safely. Reopen the app to recover the previous records, then retry.');
+    }
+    throw new Error('The change could not be saved. Your previous records have been restored. Try again.');
+  }
+};
+
+export const commitLocalJsonTransaction = async (ownerId, updates) =>
+  enqueueLocalOwnerWork(ownerId, () => commitLocalJsonTransactionNow(ownerId, updates));
+
+export const loadJson = async (key, fallback) => {
+  const ownerId = ownerFromStorageKey(key);
+  await waitForLocalOwnerWrites(ownerId);
+  // Never fall back to empty state if an interrupted finance write cannot be
+  // recovered. Doing so would let the next save overwrite data that still
+  // needs recovery.
+  if (ownerId && !key.endsWith('.pendingLocalTransaction')) {
+    await recoverPendingLocalTransaction(ownerId);
+  }
+
+  let raw = null;
+  let primaryReadFailed = false;
+  try {
+    raw = await AsyncStorage.getItem(key);
+  } catch (error) {
+    primaryReadFailed = true;
+    console.warn('[Storage] Primary local read failed; checking recovery mirror:', error?.message || error);
+  }
+  if (raw != null) {
+    try {
+      return JSON.parse(raw);
+    } catch (error) {
+      console.warn('[Storage] Primary value is invalid; checking recovery mirror:', error?.message || error);
+    }
+  }
+
+  const file = mirrorFileForKey(key);
+  if (file) {
+    try {
+      const info = await FileSystem.getInfoAsync(file);
+      if (info.exists) {
+        const contents = await FileSystem.readAsStringAsync(file);
+        let recovered;
+        try { recovered = JSON.parse(contents); }
+        catch {
+          throw new Error('Finance records need recovery. The private recovery copy is invalid. Keep your backup and contact support before making more changes.');
+        }
+        try { await AsyncStorage.setItem(key, contents); }
+        catch (error) { console.warn('[Storage] Recovered data could not be copied to primary storage:', error?.message || error); }
+        return recovered;
+      }
+    } catch (error) {
+      if (String(error?.message || '').includes('Finance records need recovery')) throw error;
+      console.warn('[Storage] Recovery mirror read failed:', error?.message || error);
+      if (primaryReadFailed || raw != null) {
+        throw new Error('Finance records need recovery. Neither local copy could be read safely. Keep your backup and contact support before making more changes.');
+      }
+    }
+  }
+  if (primaryReadFailed) {
+    throw new Error('Finance records need recovery. Local storage could not be read safely. Close and reopen the app, then restore a backup if this message continues.');
+  }
+  if (raw != null) {
+    throw new Error('Finance records need recovery. The saved value is invalid and no valid recovery copy was found. Keep your backup and contact support before making more changes.');
+  }
+  return fallback;
+};
+
+export const saveJson = async (key, value) => {
+  const ownerId = ownerFromStorageKey(key);
+  return enqueueLocalOwnerWork(ownerId, async () => {
+    let json;
+    try { json = JSON.stringify(value); }
+    catch { return false; }
+    let primarySaved = false;
+    try {
+      await AsyncStorage.setItem(key, json);
+      primarySaved = true;
+    } catch (error) {
+      console.warn('[Storage] Primary local save failed:', error?.message || error);
+    }
+    // Always attempt the private mirror, including when AsyncStorage fails, so
+    // a later recovery can still retrieve the latest serialized value.
+    await writeMirrorValue(key, json);
+    if (primarySaved && ownerId) {
+      try { const { scheduleExternalBackup } = await import('../services/externalBackup'); scheduleExternalBackup(ownerId); } catch { /* The primary local transaction is already durable. */ }
+    }
+    // A mirror-only write is not reported as a successful normal save because
+    // an older AsyncStorage value may still take precedence on the next launch.
+    return primarySaved;
+  });
+};
+
+// Remove only records/images belonging to a deleted workspace on this device.
+// This is a local cleanup; remote workspace deletion is performed by a callable
+// function after checking that the current user is the active owner.
+export const clearLocalWorkspaceArtifacts = async (uid, workspaceId) => {
+  if (!uid || !workspaceId || workspaceId === 'personal') return { complete: true };
+  return withLocalOwnerWriteLock(uid, async () => {
+  let complete = true;
+  const prefix = `expenseTracker.${uid}.${workspaceId}.`;
+  const imageKey = `expenseTracker.${uid}.workspaceImage.${workspaceId}`;
+  let keys = [];
+  try { keys = await AsyncStorage.getAllKeys(); }
+  catch (error) { complete = false; console.warn('[Workspace] Could not enumerate local storage keys:', error?.message || error); }
+  const ownedKeys = keys.filter((key) => key.startsWith(prefix) || key === imageKey);
+  if (ownedKeys.length) {
+    try { await AsyncStorage.multiRemove(ownedKeys); }
+    catch (error) { complete = false; console.warn('[Workspace] Some local storage keys remain:', error?.message || error); }
+  }
+
+  // Also scan the mirror directory itself. This catches stale mirror files left
+  // behind when a primary AsyncStorage key had already disappeared.
+  const mirrorDirectory = FileSystem.documentDirectory ? `${FileSystem.documentDirectory}ExpenseTracker/` : null;
+  if (mirrorDirectory) {
+    try {
+      const info = await FileSystem.getInfoAsync(mirrorDirectory);
+      if (info.exists) {
+        const mirrorPrefix = `${encodeURIComponent(prefix).replace(/%/g, '_')}`;
+        const imageMirror = `${encodeURIComponent(imageKey).replace(/%/g, '_')}.json`;
+        const names = await FileSystem.readDirectoryAsync(mirrorDirectory);
+        const targets = names.filter((name) => name.startsWith(mirrorPrefix) || name === imageMirror);
+        for (const name of new Set(targets)) {
+          try { await FileSystem.deleteAsync(`${mirrorDirectory}${name}`, { idempotent: true }); }
+          catch (error) { complete = false; console.warn('[Workspace] Could not remove a local recovery file:', error?.message || error); }
+        }
+      }
+    } catch (error) {
+      complete = false;
+      console.warn('[Workspace] Could not scan private recovery files:', error?.message || error);
+    }
+  }
+
+  const imagePath = `${FileSystem.documentDirectory || ''}ExpenseTracker/images/${uid}-${workspaceId}-workspace.jpg`;
+  if (FileSystem.documentDirectory) {
+    try { await FileSystem.deleteAsync(imagePath, { idempotent: true }); }
+    catch (error) { complete = false; console.warn('[Workspace] Could not remove the workspace image:', error?.message || error); }
+  }
+  return { complete };
+  });
+};
+
+// Remove every app-private artifact owned by a deleted account. External
+// document-provider backup files remain under the user's control; this only
+// clears the app's local reference to the selected folder.
+export const clearLocalAccountArtifacts = async (uid) => {
+  if (!uid) return { complete: true };
+  return withLocalOwnerWriteLock(uid, async () => {
+  let complete = true;
+  let keys = [];
+  try { keys = await AsyncStorage.getAllKeys(); }
+  catch (error) { complete = false; console.warn('[Storage] Could not enumerate local keys during account deletion:', error?.message || error); }
+  const ownedKeys = keys.filter((key) =>
+    key.startsWith(`expenseTracker.${uid}.`)
+    || key === `expenseTracker.currency.${uid}`
+    || key === `expenseTracker.currency.manual.${uid}`
+    || key.startsWith(`expenseTracker.externalBackup.${uid}.`),
+  );
+  const journalKey = pendingTransactionKey(uid);
+  if (!ownedKeys.includes(journalKey)) ownedKeys.push(journalKey);
+  if (ownedKeys.length) {
+    try { await AsyncStorage.multiRemove(ownedKeys); }
+    catch (error) { complete = false; console.warn('[Storage] Some local account keys could not be removed:', error?.message || error); }
+  }
+
+  const mirrorDirectory = FileSystem.documentDirectory ? `${FileSystem.documentDirectory}ExpenseTracker/` : null;
+  if (mirrorDirectory) {
+    try {
+      const info = await FileSystem.getInfoAsync(mirrorDirectory);
+      if (info.exists) {
+        const accountPrefix = `expenseTracker.${uid}.`;
+        const currencyMirror = `${encodeURIComponent(`expenseTracker.currency.${uid}`).replace(/%/g, '_')}.json`;
+        const manualCurrencyMirror = `${encodeURIComponent(`expenseTracker.currency.manual.${uid}`).replace(/%/g, '_')}.json`;
+        const names = await FileSystem.readDirectoryAsync(mirrorDirectory);
+        const targets = names.filter((name) =>
+          name.startsWith(accountPrefix)
+          || name === currencyMirror
+          || name === manualCurrencyMirror,
+        );
+        for (const name of new Set(targets)) {
+          try { await FileSystem.deleteAsync(`${mirrorDirectory}${name}`, { idempotent: true }); }
+          catch (error) { complete = false; console.warn('[Storage] Could not remove a private recovery file:', error?.message || error); }
+        }
+      }
+    } catch (error) {
+      complete = false;
+      console.warn('[Storage] Could not scan private recovery files:', error?.message || error);
+    }
+  }
+
+  const imagesDirectory = `${FileSystem.documentDirectory || ''}ExpenseTracker/images/`;
+  if (FileSystem.documentDirectory) {
+    try {
+      const info = await FileSystem.getInfoAsync(imagesDirectory);
+      if (info.exists) {
+        const names = await FileSystem.readDirectoryAsync(imagesDirectory);
+        await Promise.all(names.filter((name) => name.startsWith(`${uid}-`)).map(async (name) => {
+          try { await FileSystem.deleteAsync(`${imagesDirectory}${name}`, { idempotent: true }); }
+          catch (error) { complete = false; console.warn('[Storage] Could not remove a private image:', error?.message || error); }
+        }));
+      }
+    } catch (error) {
+      complete = false;
+      console.warn('[Storage] Could not scan private account images:', error?.message || error);
+    }
+  }
+  try {
+    const { clearExternalBackupFolder } = await import('../services/externalBackup');
+    await clearExternalBackupFolder(uid);
+  } catch (error) {
+    complete = false;
+    console.warn('[Backup] Local backup-folder reference could not be cleared:', error?.message || error);
+  }
+  return { complete };
+  });
 };
 
 export const saveImageLocally = async (sourceUri, fileName) => {

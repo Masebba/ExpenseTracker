@@ -1,12 +1,15 @@
+import { userFacingError } from '../utils/userFacingErrors';
 // screens/SignupScreen.js
 import React, { useState, useContext } from 'react';
 import { StyleSheet, ScrollView, Image, TouchableOpacity, Alert } from 'react-native';
 import { TextInput, Button, Text, Title } from 'react-native-paper';
 import { AuthContext } from '../AuthContext';
 import { currencyForRegion, detectDeviceRegion } from '../utils/appUtils';
+import { ThemeContext } from '../ThemeContext';
 
 export default function SignupScreen({ navigation }) {
   const { signUp, guestTransferError } = useContext(AuthContext);
+  const { palette } = useContext(ThemeContext);
   const [name, setName] = useState('');
   const [telephone, setTelephone] = useState('');
   const [email, setEmail] = useState('');
@@ -52,36 +55,36 @@ export default function SignupScreen({ navigation }) {
     // Pass the display name and a default photo URL
     signUp(trimmedEmail, password, name, telephone)
       .catch((error) => {
-        Alert.alert('Could not create account', error.message || 'Try again.');
+        Alert.alert('Could not create account', userFacingError(error, 'Please check your details and try again.'));
       });
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: palette.background }]} keyboardShouldPersistTaps="handled">
       <Image source={require('../assets/logo.png')} style={styles.logo} />
-      <Title style={styles.title}>Sign Up</Title>
-      <TextInput label="Name" value={name} onChangeText={setName} style={styles.input} />
+      <Title style={[styles.title, { color: palette.text }]}>Sign Up</Title>
+      <TextInput label="Name" value={name} onChangeText={setName} style={[styles.input, { backgroundColor: palette.surface }]} />
       <TextInput
         label="Telephone (Optional)"
         value={telephone}
         onChangeText={setTelephone}
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.surface }]}
         keyboardType="phone-pad"
       />
-      <Text style={styles.accountDataNote}>{detectedRegion ? `Detected region: ${regionName}` : `Region could not be detected; using ${regionName}`} · {detectedCurrency.code}. Currency and date/time follow this device’s region and time zone; no precise location access is used.</Text>
+      <Text style={[styles.accountDataNote, { color: palette.textMuted }]}>{detectedRegion ? `Detected region: ${regionName}` : `Region could not be detected; using ${regionName}`} · {detectedCurrency.code}. Currency and date/time follow this device’s region and time zone; no precise location access is used.</Text>
       <TextInput
         label="Email"
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.surface }]}
       />
       <TextInput
         label="Password"
         value={password}
         onChangeText={setPassword}
         secureTextEntry={!passwordVisible}
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.surface }]}
         right={
           <TextInput.Icon
             name={passwordVisible ? "eye" : "eye-off"}
@@ -94,7 +97,7 @@ export default function SignupScreen({ navigation }) {
         value={confirmPassword}
         onChangeText={setConfirmPassword}
         secureTextEntry={!confirmPasswordVisible}
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.surface }]}
         right={
           <TextInput.Icon
             name={confirmPasswordVisible ? "eye" : "eye-off"}
@@ -105,10 +108,10 @@ export default function SignupScreen({ navigation }) {
       <Button mode="contained" onPress={handleSignup} style={styles.button}>
         Sign Up
       </Button>
-      <Text style={styles.accountDataNote}>If you started a guest ledger on this device, creating an account copies it into this account's local records. Existing account records with matching IDs are kept.</Text>
+      <Text style={[styles.accountDataNote, { color: palette.textMuted }]}>If you started a guest ledger on this device, creating an account copies it into this account's local records. Existing account records with matching IDs are kept.</Text>
       {!!guestTransferError && <Text accessibilityRole="alert" style={styles.accountDataError}>{guestTransferError}</Text>}
       <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-        <Text style={styles.link}>Already have an account? Log In</Text>
+        <Text style={[styles.link, { color: palette.primary }]}>Already have an account? Log In</Text>
       </TouchableOpacity>
     </ScrollView>
   );

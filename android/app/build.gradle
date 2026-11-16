@@ -2,6 +2,15 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+// The repository checks in its native Android project, so app.json config
+// plugins are not automatically reapplied by EAS Build. Apply Google Services
+// directly when the project-specific FCM configuration file is present.
+if (file("google-services.json").exists()) {
+    apply plugin: "com.google.gms.google-services"
+} else {
+    logger.lifecycle("google-services.json not found in android/app; remote Android push registration requires Firebase FCM configuration.")
+}
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
@@ -92,8 +101,8 @@ android {
         applicationId 'com.masebba.ExpenseTracker'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0.1"
+        versionCode 5
+        versionName "1.0.4"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -105,12 +114,23 @@ android {
             keyPassword 'android'
         }
         release {
-            // EAS/Gradle release credentials are supplied through Gradle
-            // properties. Never sign a production artifact with the debug key.
-            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE') &&
-                project.hasProperty('MYAPP_UPLOAD_STORE_PASSWORD') &&
-                project.hasProperty('MYAPP_UPLOAD_KEY_ALIAS') &&
-                project.hasProperty('MYAPP_UPLOAD_KEY_PASSWORD')) {
+            // Optional local Gradle signing properties. EAS Build manages remote
+            // app-signing credentials separately and injects its signing setup
+            // through android/app/eas-build.gradle before the release task runs.
+            // Do not throw merely because MYAPP_UPLOAD_* properties are absent
+            // during Gradle project evaluation, or EAS never gets to apply its
+            // managed signing configuration.
+            def releaseCredentialKeys = [
+                'MYAPP_UPLOAD_STORE_FILE',
+                'MYAPP_UPLOAD_STORE_PASSWORD',
+                'MYAPP_UPLOAD_KEY_ALIAS',
+                'MYAPP_UPLOAD_KEY_PASSWORD'
+            ]
+            def suppliedReleaseCredentialCount = releaseCredentialKeys.count { project.hasProperty(it) && project.property(it).toString().trim() }
+            if (suppliedReleaseCredentialCount > 0 && suppliedReleaseCredentialCount < releaseCredentialKeys.size()) {
+                throw new GradleException('Local release signing credentials are incomplete. Supply all four MYAPP_UPLOAD_* properties, or use EAS-managed Android credentials.')
+            }
+            if (suppliedReleaseCredentialCount == releaseCredentialKeys.size()) {
                 storeFile file(MYAPP_UPLOAD_STORE_FILE)
                 storePassword MYAPP_UPLOAD_STORE_PASSWORD
                 keyAlias MYAPP_UPLOAD_KEY_ALIAS

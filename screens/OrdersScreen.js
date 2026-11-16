@@ -1,3 +1,4 @@
+import { userFacingError } from '../utils/userFacingErrors';
 import React, { useContext, useState } from 'react';
 import { View, StyleSheet, FlatList, Alert } from 'react-native';
 import { Title, Text, Card, Button, TextInput, Modal, Portal } from 'react-native-paper';
@@ -5,10 +6,14 @@ import { CurrencyContext } from '../CurrencyContext';
 import { OrdersContext } from '../OrdersContext';
 import { currencyFromCode, formatMoney } from '../utils/appUtils';
 import CurrencyPicker from '../components/CurrencyPicker';
+import CompactFilterMenu from '../components/CompactFilterMenu';
+import CompactSearch from '../components/CompactSearch';
+import { ThemeContext } from '../ThemeContext';
 
 export default function OrdersScreen() {
   const { currency, detectedCurrency } = useContext(CurrencyContext);
   const { orders, addOrder, updateOrder, deleteOrder, addInstallment } = useContext(OrdersContext);
+  const { palette } = useContext(ThemeContext);
   const [orderModalVisible, setOrderModalVisible] = useState(false);
   const [installmentModalVisible, setInstallmentModalVisible] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
@@ -28,7 +33,7 @@ export default function OrdersScreen() {
       if (editingOrder) await updateOrder(editingOrder.id, { customerName: customerName.trim(), customerPhone: customerPhone.trim(), productName: productName.trim(), total: Number(total), currencyCode: orderCurrencyCode });
       else await addOrder({ customerName, customerPhone, productName, total, currencyCode: orderCurrencyCode });
       resetOrderForm(); setOrderModalVisible(false);
-    } catch (error) { Alert.alert('Unable to save order', error.message); }
+    } catch (error) { Alert.alert('Unable to save order', userFacingError(error, 'Please check the order details and try again.')); }
   };
 
   const handleAddInstallment = async () => {
@@ -36,13 +41,13 @@ export default function OrdersScreen() {
     try {
       await addInstallment(editingOrder.id, installmentAmount);
       setInstallmentAmount(''); setEditingOrder(null); setInstallmentModalVisible(false);
-    } catch (error) { Alert.alert('Unable to add installment', error.message); }
+    } catch (error) { Alert.alert('Unable to add installment', userFacingError(error, 'Please check the payment details and try again.')); }
   };
 
   const renderOrder = ({ item }) => {
     const paid = (item.installments || []).reduce((sum, inst) => sum + Number(inst.amount || 0), 0);
     const balance = Math.max(0, item.total - paid);
-    return <Card style={styles.card}>
+    return <Card style={[styles.card, { backgroundColor: palette.surface }]} >
       <Card.Title title={`Order #${item.id}`} subtitle={`Status: ${item.status}`} subtitleStyle={item.status === 'Completed' ? styles.statusCompleted : styles.statusPending} />
       <Card.Content>
         <Text>Customer: {item.customerName}</Text>
@@ -61,26 +66,29 @@ export default function OrdersScreen() {
     </Card>;
   };
 
-  return <View style={styles.container}>
-    <Title>Order Management</Title>
-    <Button mode="contained" onPress={() => { resetOrderForm(); setOrderModalVisible(true); }} style={styles.button}>Add Order (Installments)</Button>
-    <TextInput label="Search customer, phone or product" value={search} onChangeText={setSearch} style={styles.input} />
-    <View style={styles.filters}>{['All','Pending','Completed'].map((status) => <Button key={status} compact mode={statusFilter===status?'contained':'outlined'} onPress={() => setStatusFilter(status)}>{status}</Button>)}</View>
-    {orders.length ? <FlatList data={orders.filter((order) => (statusFilter==='All' || order.status===statusFilter) && `${order.customerName} ${order.customerPhone} ${order.productName}`.toLowerCase().includes(search.trim().toLowerCase()))} keyExtractor={(item) => item.id} renderItem={renderOrder} /> : <Text style={styles.empty}>No orders recorded yet.</Text>}
+  const filteredOrders = orders.filter((order) => (statusFilter === 'All' || order.status === statusFilter) && `${order.customerName || ''} ${order.customerPhone || ''} ${order.productName || ''} ${order.id || ''}`.toLowerCase().includes(search.trim().toLowerCase()));
+  return <View style={[styles.container, { backgroundColor: palette.background }]} >
+    <View style={styles.headingRow}><Title style={styles.pageTitle}>Order Management</Title><Text style={[styles.countText, { color: palette.textMuted }]} >{orders.length} orders</Text></View>
+    <View style={styles.toolbar}>
+      <Button compact icon="plus" mode="contained" onPress={() => { resetOrderForm(); setOrderModalVisible(true); }} style={styles.addButton}>Add order</Button>
+      <CompactFilterMenu value={statusFilter} label="Status" onChange={setStatusFilter} options={[{value:'All',label:'All statuses'},{value:'Pending',label:'Pending'},{value:'Completed',label:'Completed'}]} />
+      <CompactSearch value={search} onChangeText={setSearch} placeholder="Customer, phone or product" accessibilityLabel="Search orders" />
+    </View>
+    <FlatList style={styles.ordersList} contentContainerStyle={filteredOrders.length ? styles.ordersContent : styles.emptyContent} data={filteredOrders} keyExtractor={(item) => item.id} renderItem={renderOrder} keyboardShouldPersistTaps="handled" ListEmptyComponent={<Text style={[styles.empty, { color: palette.textMuted }]} >{orders.length ? 'No orders match this filter.' : 'No orders recorded yet. Tap Add order to get started.'}</Text>} />
     <Portal>
-      <Modal visible={orderModalVisible} onDismiss={() => { setOrderModalVisible(false); resetOrderForm(); }} contentContainerStyle={styles.modal}>
+      <Modal visible={orderModalVisible} onDismiss={() => { setOrderModalVisible(false); resetOrderForm(); }} contentContainerStyle={[styles.modal, { backgroundColor: palette.surface }]}>
         <Title>{editingOrder ? 'Edit Order' : 'Add Order'}</Title>
-        <TextInput label="Customer Name" value={customerName} onChangeText={setCustomerName} style={styles.input} />
-        <TextInput label="Customer Phone" value={customerPhone} onChangeText={setCustomerPhone} keyboardType="phone-pad" style={styles.input} />
-        <TextInput label="Product Name" value={productName} onChangeText={setProductName} style={styles.input} />
+        <TextInput label="Customer Name" value={customerName} onChangeText={setCustomerName} style={[styles.input, { backgroundColor: palette.input }]} />
+        <TextInput label="Customer Phone" value={customerPhone} onChangeText={setCustomerPhone} keyboardType="phone-pad" style={[styles.input, { backgroundColor: palette.input }]} />
+        <TextInput label="Product Name" value={productName} onChangeText={setProductName} style={[styles.input, { backgroundColor: palette.input }]} />
         <CurrencyPicker value={orderCurrencyCode} onChange={setOrderCurrencyCode} label="Order currency" />
-        <TextInput label={`Total (${orderCurrencyCode})`} value={total} onChangeText={setTotal} keyboardType="numeric" style={styles.input} />
+        <TextInput label={`Total (${orderCurrencyCode})`} value={total} onChangeText={setTotal} keyboardType="numeric" style={[styles.input, { backgroundColor: palette.input }]} />
         <Button mode="contained" onPress={handleSaveOrder} style={styles.button}>{editingOrder ? 'Update Order' : 'Add Order'}</Button>
         <Button onPress={() => { setOrderModalVisible(false); resetOrderForm(); }}>Cancel</Button>
       </Modal>
-      <Modal visible={installmentModalVisible} onDismiss={() => { setInstallmentModalVisible(false); setInstallmentAmount(''); setEditingOrder(null); }} contentContainerStyle={styles.modal}>
+      <Modal visible={installmentModalVisible} onDismiss={() => { setInstallmentModalVisible(false); setInstallmentAmount(''); setEditingOrder(null); }} contentContainerStyle={[styles.modal, { backgroundColor: palette.surface }]}>
         <Title>Add Installment</Title>
-        <TextInput label={`Installment Amount (${editingOrder?.currencyCode || detectedCurrency?.code || currency.code})`} value={installmentAmount} onChangeText={setInstallmentAmount} keyboardType="numeric" style={styles.input} />
+        <TextInput label={`Installment Amount (${editingOrder?.currencyCode || detectedCurrency?.code || currency.code})`} value={installmentAmount} onChangeText={setInstallmentAmount} keyboardType="numeric" style={[styles.input, { backgroundColor: palette.input }]} />
         <Button mode="contained" onPress={handleAddInstallment} style={styles.button}>Add Installment</Button>
         <Button onPress={() => { setInstallmentModalVisible(false); setInstallmentAmount(''); setEditingOrder(null); }}>Cancel</Button>
       </Modal>
@@ -89,8 +97,12 @@ export default function OrdersScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: 18, paddingTop: 22, paddingBottom: 112, backgroundColor: '#f4f6f3' },
-  filters:{flexDirection:'row',gap:4,marginBottom:6},
+  container: { flex: 1, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2, backgroundColor: '#f4f6f3' },
+  headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  pageTitle: { fontSize: 21, color: '#24432b' }, countText: { color: '#66756a', fontSize: 12 },
+  toolbar: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 5 },
+  addButton: { borderRadius: 18, flexShrink: 1 },
+  ordersList: { flex: 1 }, ordersContent: { paddingBottom: 8 }, emptyContent: { flexGrow: 1, justifyContent: 'center' },
   card: { marginVertical: 6, backgroundColor: '#fff', borderRadius: 16, elevation: 1 },
   button: { marginVertical: 5, borderRadius: 24 },
   input: { marginBottom: 10, backgroundColor: '#fff' },
@@ -98,5 +110,5 @@ const styles = StyleSheet.create({
   installmentsContainer: { marginTop: 10 },
   statusCompleted: { color: 'green', fontWeight: 'bold' },
   statusPending: { color: 'red', fontWeight: 'bold' },
-  empty: { textAlign: 'center', marginTop: 30 },
+  empty: { textAlign: 'center', marginTop: 30, color: '#68776c', paddingHorizontal: 20, lineHeight: 20 },
 });

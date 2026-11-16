@@ -1,13 +1,15 @@
 import React, { createContext, useEffect, useRef, useState } from 'react';
 import { createUserWithEmailAndPassword, EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, sendPasswordResetEmail, signInWithEmailAndPassword, signOut as firebaseSignOut, updateProfile } from 'firebase/auth';
-import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { auth, firestore } from './firebase';
 import { acceptOrganizationInvitation, createOrganization, inviteOrganizationMember, listenToInvitations, listenToMemberships, listOrganizationMembers, removeOrganizationMember, updateMemberRole, updateOrganizationDetails } from './services/organizations';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
-import { detectDeviceRegion } from './utils/appUtils';
+import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
+import { clearLocalAccountArtifacts, clearLocalWorkspaceArtifacts, detectDeviceRegion, isUsableLocalImage, waitForLocalOwnerWrites } from './utils/appUtils';
+import { userFacingError } from './utils/userFacingErrors';
 
 export const AuthContext = createContext();
 
@@ -16,8 +18,10 @@ const GUEST_CLAIM_KEY = 'expenseTracker.guestClaimPending';
 const getCountryCode = () => detectDeviceRegion() || 'UG';
 
 async function moveGuestDataToAccount(uid) {
+  await waitForLocalOwnerWrites('guest');
+  await waitForLocalOwnerWrites(uid);
   const keys = await AsyncStorage.getAllKeys();
-  const guestKeys = keys.filter((key) => key.startsWith('expenseTracker.guest.') || key === 'expenseTracker.currency.guest');
+  const guestKeys = keys.filter((key) => key.startsWith('expenseTracker.guest.') || key === 'expenseTracker.currency.guest' || key === 'expenseTracker.currency.manual.guest');
   const guestBackupKeys = keys.filter((key) => key.startsWith('expenseTracker.externalBackup.guest.'));
   const accountBackupDirectory = await AsyncStorage.getItem(`expenseTracker.externalBackup.${uid}.directory`);
   const transferGuestBackup = !accountBackupDirectory && guestBackupKeys.length > 0;
@@ -32,7 +36,9 @@ async function moveGuestDataToAccount(uid) {
     if (guestRaw == null) continue;
     const accountKey = guestKey === 'expenseTracker.currency.guest'
       ? `expenseTracker.currency.${uid}`
-      : guestKey.replace(/^expenseTracker\.guest\./, `expenseTracker.${uid}.`);
+      : guestKey === 'expenseTracker.currency.manual.guest'
+        ? `expenseTracker.currency.manual.${uid}`
+        : guestKey.replace(/^expenseTracker\.guest\./, `expenseTracker.${uid}.`);
     const accountRaw = await AsyncStorage.getItem(accountKey);
     let merged = guestRaw;
     if (accountRaw != null) {
@@ -63,7 +69,7 @@ async function moveGuestDataToAccount(uid) {
     await FileSystem.makeDirectoryAsync(appDataDirectory, { intermediates: true }).catch(() => {});
     const mirroredTargets = new Set();
     for (const [key, value] of writes) {
-      if (!key.startsWith(`expenseTracker.${uid}.`) && key !== `expenseTracker.currency.${uid}`) continue;
+      if (!key.startsWith(`expenseTracker.${uid}.`) && key !== `expenseTracker.currency.${uid}` && key !== `expenseTracker.currency.manual.${uid}`) continue;
       const safeName = encodeURIComponent(key).replace(/%/g, '_');
       try {
         await FileSystem.writeAsStringAsync(`${appDataDirectory}${safeName}.json`, value);
@@ -73,7 +79,9 @@ async function moveGuestDataToAccount(uid) {
     for (const guestKey of guestKeys) {
       const accountKey = guestKey === 'expenseTracker.currency.guest'
         ? `expenseTracker.currency.${uid}`
-        : guestKey.replace(/^expenseTracker\.guest\./, `expenseTracker.${uid}.`);
+        : guestKey === 'expenseTracker.currency.manual.guest'
+          ? `expenseTracker.currency.manual.${uid}`
+          : guestKey.replace(/^expenseTracker\.guest\./, `expenseTracker.${uid}.`);
       if (!mirroredTargets.has(accountKey)) continue;
       const safeName = encodeURIComponent(guestKey).replace(/%/g, '_');
       await FileSystem.deleteAsync(`${appDataDirectory}${safeName}.json`, { idempotent: true }).catch(() => {});
@@ -115,7 +123,7 @@ export const AuthProvider = ({ children }) => {
           await AsyncStorage.setItem(GUEST_MODE_KEY, 'false');
           setGuestTransferError('');
         } catch (error) {
-          setGuestTransferError(`Your guest records were kept on this device, but could not be copied into the account: ${error?.message || 'storage error'}`);
+          setGuestTransferError(`Your guest records were kept on this device, but could not be copied into the account. ${userFacingError(error, 'Please free some device storage and try again.')}`);
           console.warn('Guest data transfer failed:', error?.message || error);
           await firebaseSignOut(auth).catch(() => {});
           if (event === authEvent.current) setLoading(false);
@@ -138,10 +146,12 @@ export const AuthProvider = ({ children }) => {
     setActiveWorkspaceState({ id: 'personal', name: 'Personal', type: 'personal', role: 'owner' });
     if (firebaseUser) {
       await ensureProfile(firebaseUser);
-      const [profile, localImage] = await Promise.all([
-        AsyncStorage.getItem(`expenseTracker.${firebaseUser.uid}.profileImage`).catch(() => null),
-      ]);
-      setProfileImage(localImage || firebaseUser.photoURL || null);
+      const localImage = await AsyncStorage.getItem(`expenseTracker.${firebaseUser.uid}.profileImage`).catch(() => null);
+      const usableLocalImage = isUsableLocalImage(localImage, FileSystem.documentDirectory) ? localImage : null;
+      setProfileImage(usableLocalImage || firebaseUser.photoURL || null);
+    } else if (savedGuestMode) {
+      const localImage = await AsyncStorage.getItem('expenseTracker.guest.profileImage').catch(() => null);
+      setProfileImage(isUsableLocalImage(localImage, FileSystem.documentDirectory) ? localImage : null);
     }
     if (event === authEvent.current) setLoading(false);
   }), []);
@@ -198,7 +208,7 @@ export const AuthProvider = ({ children }) => {
     setInvitationSyncError(null);
     return listenToInvitations(user.email, (items) => { setInvitations(items); setInvitationSyncError(null); }, (error) => {
       console.warn('Invitation sync failed:', error?.message || error);
-      setInvitationSyncError(error?.message || 'Firestore denied the invitation query.');
+      setInvitationSyncError(userFacingError(error, 'We could not check invitations. Check your connection and try again.'));
     });
   }, [user?.email]);
 
@@ -227,6 +237,7 @@ export const AuthProvider = ({ children }) => {
         uid: firebaseUser.uid, email: firebaseUser.email || null,
         displayName: firebaseUser.displayName || '', photoURL: firebaseUser.photoURL || null,
         ...(profile.exists() ? profile.data() : {}), ...extra,
+        createdAt: (profile.exists() && profile.data()?.createdAt) ? profile.data().createdAt : serverTimestamp(),
         countryCode:
           (profile.exists() && profile.data()?.countryCode) ||
           extra.countryCode ||
@@ -278,15 +289,16 @@ export const AuthProvider = ({ children }) => {
   const exportMyData = async () => {
     const ownerId = user?.uid || (guestMode ? 'guest' : null);
     if (!ownerId) throw new Error('Open a local session to export your data.');
-    const keys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(`expenseTracker.${ownerId}.`));
+    const keys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(`expenseTracker.${ownerId}.`) && !key.endsWith('.pendingLocalTransaction') && !key.includes('.cloudBaseline.'));
     const localEntries = await AsyncStorage.multiGet(keys);
     const localData = Object.fromEntries(localEntries.map(([key, raw]) => {
       try { return [key, raw == null ? null : JSON.parse(raw)]; } catch { return [key, raw]; }
     }));
-    const currencyKey = `expenseTracker.currency.${ownerId}`;
-    const currencyRaw = await AsyncStorage.getItem(currencyKey);
-    if (currencyRaw != null) {
-      try { localData[currencyKey] = JSON.parse(currencyRaw); } catch { localData[currencyKey] = currencyRaw; }
+    for (const currencyKey of [`expenseTracker.currency.${ownerId}`, `expenseTracker.currency.manual.${ownerId}`]) {
+      const currencyRaw = await AsyncStorage.getItem(currencyKey);
+      if (currencyRaw != null) {
+        try { localData[currencyKey] = JSON.parse(currencyRaw); } catch { localData[currencyKey] = currencyRaw; }
+      }
     }
     const cloudData = {};
     const organizationData = {};
@@ -326,11 +338,11 @@ export const AuthProvider = ({ children }) => {
     try { await reauthenticateWithCredential(current, EmailAuthProvider.credential(current.email, password)); }
     catch { throw new Error('Password confirmation failed. Check your password and try again.'); }
     const clearLocalAccountData = async () => {
-      const keys = (await AsyncStorage.getAllKeys()).filter((key) => key.includes(current.uid));
-      if (keys.length) await AsyncStorage.multiRemove(keys);
-      await SecureStore.deleteItemAsync(`expenseTracker.appPin.${current.uid}`).catch(() => {});
-      const profileImagePath = `${FileSystem.documentDirectory}ExpenseTracker/images/${current.uid}-profile.jpg`;
-      await FileSystem.deleteAsync(profileImagePath, { idempotent: true }).catch(() => {});
+      const localCleanup = await clearLocalAccountArtifacts(current.uid);
+      let pinCleanupComplete = true;
+      try { await SecureStore.deleteItemAsync(`expenseTracker.appPin.${current.uid}`); }
+      catch (error) { pinCleanupComplete = false; console.warn('[Account] Could not remove the local app PIN:', error?.message || error); }
+      return { complete: localCleanup?.complete !== false && pinCleanupComplete };
     };
     const membershipsSnapshot = await getDocs(collection(firestore, 'users', current.uid, 'memberships'));
     const ownerWorkspaces = membershipsSnapshot.docs.filter((item) => item.data().role === 'owner' && item.data().status === 'active');
@@ -345,18 +357,20 @@ export const AuthProvider = ({ children }) => {
       catch (reloadError) { accountAlreadyDeleted = reloadError?.code === 'auth/user-not-found'; }
       if (accountAlreadyDeleted) {
         await firebaseSignOut(auth).catch(() => {});
-        await clearLocalAccountData();
-        return;
+        const cleanup = await clearLocalAccountData();
+        return { deleted: true, localCleanupComplete: cleanup.complete };
       }
       if (error?.code === 'functions/not-found' || error?.code === 'functions/unavailable') {
         throw new Error('Secure account deletion is not deployed for this Firebase project yet. No account data was removed. Please contact support or try again after the deletion service is deployed.');
       }
-      if (error?.code === 'functions/failed-precondition') throw new Error(error.message || 'Transfer ownership of each active organization before deleting this account.');
-      throw new Error(`Account deletion did not finish. Your sign-in is still active so you can retry safely. ${error?.message || ''}`.trim());
+      if (error?.code === 'functions/failed-precondition') throw new Error('Transfer ownership or delete each organisation you own before deleting this account.');
+      console.warn('Account deletion request failed:', error?.code || 'unknown', error?.message || error);
+      throw new Error('Account deletion did not finish. Your sign-in is still active, and you can safely try again later. If the problem continues, contact support.');
     }
     if (deletionResult?.data?.deleted !== true) throw new Error('The deletion service did not confirm completion. Your sign-in is still active so you can retry.');
     await firebaseSignOut(auth);
-    await clearLocalAccountData();
+    const cleanup = await clearLocalAccountData();
+    return { deleted: true, localCleanupComplete: cleanup.complete };
   };
 
   const createCompany = async (name, type = 'company', details = {}) => {
@@ -386,6 +400,48 @@ export const AuthProvider = ({ children }) => {
   const getMembers = (organizationId) => listOrganizationMembers(organizationId);
   const changeMemberRole = (organizationId, memberId, role) => updateMemberRole(user?.uid, organizationId, memberId, role);
   const removeMember = (organizationId, memberId) => removeOrganizationMember(user?.uid, organizationId, memberId);
+  const transferWorkspaceOwnership = async (organizationId, newOwnerUid) => {
+    if (!user?.uid) throw new Error('Sign in to transfer workspace ownership.');
+    const transfer = httpsCallable(getFunctions(auth.app), 'transferOrganizationOwnership');
+    try {
+      const result = await transfer({ organizationId, newOwnerUid });
+      return result.data;
+    } catch (error) {
+      if (error?.code === 'functions/not-found' || error?.code === 'functions/unavailable') throw new Error('Workspace ownership transfer is not deployed yet. Deploy the updated Firebase Functions first.');
+      if (error?.code === 'functions/permission-denied') throw new Error('Only the current workspace owner can transfer ownership.');
+      if (error?.code === 'functions/failed-precondition') throw new Error('Choose an existing active workspace member as the new owner.');
+      throw new Error(userFacingError(error, 'Ownership could not be transferred. Check your connection and try again.'));
+    }
+  };
+  const deleteWorkspace = async (organizationId) => {
+    if (!user?.uid) throw new Error('Sign in to delete a workspace.');
+    const remove = httpsCallable(getFunctions(auth.app), 'deleteOrganization');
+    let result;
+    try {
+      result = await remove({ organizationId });
+      if (result?.data?.deleted !== true) throw new Error('The server did not confirm workspace deletion.');
+    } catch (error) {
+      if (error?.code === 'functions/not-found' || error?.code === 'functions/unavailable') throw new Error('Workspace deletion is not deployed yet. Deploy the updated Firebase Functions first.');
+      if (error?.code === 'functions/permission-denied') throw new Error('Only the active workspace owner can delete this workspace.');
+      throw new Error(userFacingError(error, 'Workspace deletion did not finish. You can safely retry after checking your connection.'));
+    }
+
+    // The server deletion is already complete at this point. Always update the
+    // active workspace state even if local cleanup fails, so the UI cannot
+    // strand the owner in a workspace that no longer exists.
+    let localCleanupComplete = true;
+    try {
+      const cleanup = await clearLocalWorkspaceArtifacts(user.uid, organizationId);
+      localCleanupComplete = cleanup?.complete !== false;
+    } catch (error) {
+      localCleanupComplete = false;
+      console.warn('[Workspace] Remote deletion succeeded, but local cleanup needs attention:', error?.message || error);
+    }
+    setMemberships((items) => items.filter((item) => item.id !== organizationId));
+    setActiveWorkspaceState((item) => item?.id === organizationId ? { id: 'personal', name: 'Personal', type: 'personal', role: 'owner' } : item);
+    return { ...result.data, localCleanupComplete };
+  };
+
   const refreshDeveloperAccess = async () => {
     if (!auth.currentUser) return { error: 'No Firebase user is currently signed in.' };
     const current = auth.currentUser;
@@ -404,8 +460,9 @@ export const AuthProvider = ({ children }) => {
     }
   };
   const updateProfileImage = async (uri) => {
-    if (!user?.uid) return;
-    await AsyncStorage.setItem(`expenseTracker.${user.uid}.profileImage`, uri);
+    const ownerId = user?.uid || (guestMode ? 'guest' : null);
+    if (!ownerId) throw new Error('Open a personal account or guest session before updating the profile photo.');
+    await AsyncStorage.setItem(`expenseTracker.${ownerId}.profileImage`, uri);
     setProfileImage(uri);
   };
   const updateWorkspacePhoto = async (organizationId, photoURL) => {
@@ -443,5 +500,7 @@ export const AuthProvider = ({ children }) => {
     setUser(Object.assign(Object.create(Object.getPrototypeOf(current)), current, updates));
   };
 
-  return <AuthContext.Provider value={{ user, guestMode, guestTransferError, startGuestMode, openAccountAccess, exitGuestMode, storageRevision, reloadLocalData, memberships, invitations, invitationSyncError, acceptInvitation, activeWorkspace, setActiveWorkspace, isDeveloper, developerAccessInfo, refreshDeveloperAccess, profileImage, countryCode, updateProfileImage, personalDetails, updatePersonalDetails, businessProfile, updatePersonalBusinessProfile, updateWorkspaceDetails, createCompany, inviteMember, getMembers, changeMemberRole, removeMember, updateWorkspacePhoto, signIn, signUp, signOut, resetPassword, exportMyData, deleteMyAccount, updateUserProfile, updateUserData }}>{!loading && children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, guestMode, guestTransferError, startGuestMode, openAccountAccess, exitGuestMode, storageRevision, reloadLocalData, memberships, invitations, invitationSyncError, acceptInvitation, activeWorkspace, setActiveWorkspace, isDeveloper, developerAccessInfo, refreshDeveloperAccess, profileImage, countryCode, updateProfileImage, personalDetails, updatePersonalDetails, businessProfile, updatePersonalBusinessProfile, updateWorkspaceDetails, createCompany, inviteMember, getMembers, changeMemberRole, removeMember, transferWorkspaceOwnership, deleteWorkspace, updateWorkspacePhoto, signIn, signUp, signOut, resetPassword, exportMyData, deleteMyAccount, updateUserProfile, updateUserData }}>{loading ? <View style={loadingStyles.container}><Image source={require('./assets/logo.png')} style={loadingStyles.logo} resizeMode="contain" /><ActivityIndicator size="large" color="#2f7040" /><Text style={loadingStyles.title}>FinanceTracker</Text><Text style={loadingStyles.subtitle}>Preparing your workspace…</Text></View> : children}</AuthContext.Provider>;
 };
+
+const loadingStyles = StyleSheet.create({ container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: '#f4f6f3' }, logo: { width: 116, height: 116, marginBottom: 22 }, title: { color: '#2f7040', fontSize: 22, fontWeight: '800', marginTop: 16 }, subtitle: { color: '#617064', fontSize: 14, marginTop: 6 } });
