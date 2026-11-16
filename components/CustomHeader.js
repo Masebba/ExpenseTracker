@@ -129,7 +129,7 @@ export default function CustomHeader() {
           </TouchableOpacity>
           <View style={styles.nameBox}>
             <Text numberOfLines={1} style={[styles.name, { color: palette.headerText }]}>{name}</Text>
-            {!personal && <Text numberOfLines={1} style={[styles.workspaceRole, { color: palette.headerText }]}>{activeWorkspace?.role ? `${activeWorkspace.role} workspace` : 'Business workspace'}</Text>}
+            <Text numberOfLines={1} style={[styles.workspaceRole, { color: palette.headerText }]}>{personal ? (guestMode ? 'Guest account · Saved on this device' : 'Personal account · Private ledger') : (activeWorkspace?.role ? `${activeWorkspace.role} workspace` : 'Business workspace')}</Text>
           </View>
         </View>
         <View style={styles.headerActions}>
@@ -184,12 +184,12 @@ export default function CustomHeader() {
 }
 
 const styles = StyleSheet.create({
-  container: { height: 82, width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 16, paddingBottom: 8 },
+  container: { height: 74, width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 0, paddingBottom: 0 },
   profile: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9, minWidth: 0 },
   avatarButton: { width: 42, height: 42, position: 'relative', justifyContent: 'center' },
   avatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#e5ebe4' },
   avatarFallback: { backgroundColor: '#dce8dd', alignItems: 'center', justifyContent: 'center' },
-  cameraBadge: { position: 'absolute', right: 1, bottom: 0, height: 17, width: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2f7040' },
+  cameraBadge: { position: 'absolute', right: 1, bottom: 0, height: 17, width: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#267F4D' },
   nameBox: { flex: 1, minWidth: 0 },
   name: { maxWidth: '100%', fontSize: 12, marginTop: 2, fontWeight: '600' },
   workspaceRole: { fontSize: 9, opacity: 0.8, marginTop: 1, textTransform: 'capitalize' },

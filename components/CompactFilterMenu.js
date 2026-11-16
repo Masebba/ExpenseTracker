@@ -3,7 +3,7 @@ import { Button, Menu } from 'react-native-paper';
 import { ThemeContext } from '../ThemeContext';
 
 /** A compact single-select filter that keeps long category lists out of the page layout. */
-export default function CompactFilterMenu({ value, options = [], onChange, label = 'Filter', disabled = false }) {
+export default function CompactFilterMenu({ value, options = [], onChange, label = 'Filter', disabled = false, onHeader = false }) {
   const { palette } = useContext(ThemeContext);
   const [visible, setVisible] = useState(false);
   const safeOptions = Array.isArray(options) ? options : [];
@@ -26,11 +26,11 @@ export default function CompactFilterMenu({ value, options = [], onChange, label
           compact
           icon="filter-variant"
           mode="outlined"
-          textColor={palette.text}
+          textColor={onHeader ? palette.headerText : palette.text}
           disabled={disabled}
           onPress={() => setVisible(true)}
           accessibilityLabel={`${label}: ${fullLabel}`}
-          style={{ borderRadius: 20, flexShrink: 1, borderColor: palette.border }}
+          style={{ borderRadius: 20, flexShrink: 1, borderColor: onHeader ? 'rgba(255,255,255,0.68)' : palette.border, backgroundColor: onHeader ? 'rgba(255,255,255,0.12)' : 'transparent' }}
           contentStyle={{ minHeight: 36 }}
         >
           {displayLabel}

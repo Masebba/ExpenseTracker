@@ -148,7 +148,7 @@ const styles = StyleSheet.create({
   },
   link: {
     textAlign: 'center',
-    color: '#2f7040',
+    color: '#267F4D',
     marginTop: 15
   },
   accountDataNote: { color: '#667268', textAlign: 'center', fontSize: 12, lineHeight: 18, marginTop: 4 },

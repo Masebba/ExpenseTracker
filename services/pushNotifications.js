@@ -27,7 +27,7 @@ export async function configureNotificationPresentation() {
       name: 'FinanceTracker alerts',
       importance: Notifications.AndroidImportance.DEFAULT,
       vibrationPattern: [0, 180, 120, 180],
-      lightColor: '#2f7040',
+      lightColor: '#267F4D',
       sound: 'default',
     });
   }

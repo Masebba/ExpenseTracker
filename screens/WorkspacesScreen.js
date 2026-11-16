@@ -590,7 +590,7 @@ export default function WorkspacesScreen({ navigation }) {
                 <Button onPress={() => setSelectedId(null)}>Cancel</Button>
                 {current?.role === "owner" && (
                   <Button
-                    textColor="#2f7040"
+                    textColor="#267F4D"
                     disabled={busy}
                     onPress={() => {
                       const target = members.find((member) => member.id === selectedId);
@@ -659,11 +659,13 @@ export default function WorkspacesScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  safeArea: { flex: 1, backgroundColor: "#2f7040" },
+  safeArea: { flex: 1, backgroundColor: "#267F4D" },
   pageHeader: {
+    height: 56,
+    justifyContent: 'center',
     paddingHorizontal: 22,
-    paddingVertical: 10,
-    backgroundColor: "#2f7040",
+    paddingVertical: 0,
+    backgroundColor: "#267F4D",
   },
   container: {
     ...contentWidthStyle,

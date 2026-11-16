@@ -101,52 +101,139 @@ export const SalesProvider = ({ children }) => {
     ? `expenseTracker.${user.uid}.${scopeId === 'personal' ? '' : `${scopeId}.`}products`
     : 'expenseTracker.guest.products', [user?.uid, scopeId]);
 
-  const recordSale = useCallback(async ({ productId, quantity, discount = 0, paymentOption = 'Cash', currencyCode, unitPriceOverride }) => {
+  const recordSaleBatch = useCallback(async ({ items = [], paymentOption = 'Cash', currencyCode } = {}) => {
     if (saleOperationInProgress.current) throw new Error('Another sale is being saved. Wait for it to finish and try again.');
     saleOperationInProgress.current = true;
     try {
       return await withLocalLedgerMutationLock(user?.uid || 'guest', async () => {
-        const product = products.find((item) => item.id === productId);
-        if (!product) throw new Error('Product could not be found.');
-        const qty = Math.trunc(toNumber(quantity, NaN));
-        const disc = toNumber(discount, 0);
-        if (!Number.isInteger(qty) || qty < 1) throw new Error('Quantity must be a whole number greater than zero.');
-        if (product.stock < qty) throw new Error(`Not enough stock. Available: ${product.stock}`);
-        if (!Number.isFinite(disc) || disc < 0 || disc > 100) throw new Error('Discount must be between 0% and 100%.');
-        const effectiveUnitPrice = unitPriceOverride === undefined || unitPriceOverride === null || unitPriceOverride === ''
-          ? product.price
-          : toNumber(unitPriceOverride, NaN);
-        if (!Number.isFinite(effectiveUnitPrice) || effectiveUnitPrice <= 0) throw new Error('Enter a valid unit selling price greater than zero.');
+        if (!Array.isArray(items) || items.length === 0) throw new Error('Add at least one product to the sale before completing checkout.');
         if (!transactionsHydrated || !Array.isArray(getCurrentTransactions())) throw new Error('Your income and expense records are still loading. Wait a moment and try again.');
 
-        const priceCurrencyCode = product.currencyCode || detectedCurrency?.code || currency?.code || 'UGX';
-        const saleCurrencyCode = String(currencyCode || priceCurrencyCode).toUpperCase();
-        const salePriceRate = await getExchangeRate(priceCurrencyCode, saleCurrencyCode);
-        const costBase = await convertAmount(product.buyingPrice, priceCurrencyCode, currency?.code || 'UGX');
-        const unitPrice = effectiveUnitPrice * salePriceRate.rate * (1 - disc / 100);
-        const finalAmount = Math.round(unitPrice * qty * 100) / 100;
-        const converted = await convertAmount(finalAmount, saleCurrencyCode, currency?.code || 'UGX');
+        const baseCurrencyCode = currency?.code || detectedCurrency?.code || 'UGX';
+        const saleCurrencyCode = String(currencyCode || baseCurrencyCode).toUpperCase();
+        const quantitiesByProduct = new Map();
+        const preparedLines = [];
+        const timestamp = nowIso();
+        const saleId = makeId('sale');
+
+        for (let index = 0; index < items.length; index += 1) {
+          const input = items[index] || {};
+          const product = products.find((item) => item.id === input.productId);
+          if (!product) throw new Error(`Product ${index + 1} could not be found. Remove it from the cart and add it again.`);
+          const qty = Math.trunc(toNumber(input.quantity, NaN));
+          const disc = toNumber(input.discount, 0);
+          if (!Number.isInteger(qty) || qty < 1) throw new Error(`Quantity for ${product.name} must be a whole number greater than zero.`);
+          if (!Number.isFinite(disc) || disc < 0 || disc > 100) throw new Error(`Discount for ${product.name} must be between 0% and 100%.`);
+          const effectiveUnitPrice = input.unitPriceOverride === undefined || input.unitPriceOverride === null || input.unitPriceOverride === ''
+            ? toNumber(product.price, NaN)
+            : toNumber(input.unitPriceOverride, NaN);
+          if (!Number.isFinite(effectiveUnitPrice) || effectiveUnitPrice <= 0) throw new Error(`Enter a valid selling price for ${product.name}.`);
+
+          quantitiesByProduct.set(product.id, (quantitiesByProduct.get(product.id) || 0) + qty);
+          const priceCurrencyCode = product.currencyCode || detectedCurrency?.code || currency?.code || 'UGX';
+          const salePriceRate = await getExchangeRate(priceCurrencyCode, saleCurrencyCode);
+          const costBase = await convertAmount(toNumber(product.buyingPrice, 0), priceCurrencyCode, baseCurrencyCode);
+          const convertedUnitPrice = effectiveUnitPrice * salePriceRate.rate;
+          const subtotalAmount = Math.round(convertedUnitPrice * qty * 100) / 100;
+          const discountAmount = Math.round(subtotalAmount * (disc / 100) * 100) / 100;
+          const finalAmount = Math.round((subtotalAmount - discountAmount) * 100) / 100;
+          const convertedBase = await convertAmount(finalAmount, saleCurrencyCode, baseCurrencyCode);
+
+          preparedLines.push({
+            id: `${saleId}_item_${index + 1}`,
+            productId: product.id,
+            productName: product.name,
+            productCategory: product.category || '',
+            barcode: product.barcode || '',
+            originalPrice: toNumber(product.price, 0),
+            saleUnitPrice: effectiveUnitPrice,
+            convertedUnitPrice: Math.round(convertedUnitPrice * 100) / 100,
+            priceCurrencyCode,
+            currencyCode: saleCurrencyCode,
+            priceExchangeRate: salePriceRate.rate,
+            priceExchangeRateTimestamp: salePriceRate.timestamp,
+            priceExchangeRateStale: salePriceRate.isStale === true,
+            costAtSale: toNumber(product.buyingPrice, 0),
+            costCurrencyCode: priceCurrencyCode,
+            costAtSaleBaseAmount: Math.round(costBase.amount * qty * 1000000) / 1000000,
+            costBaseCurrencyCode: baseCurrencyCode,
+            quantity: qty,
+            discount: disc,
+            subtotalAmount,
+            discountAmount,
+            finalAmount,
+            baseAmount: Math.round(convertedBase.amount * 1000000) / 1000000,
+            baseCurrencyCode,
+            exchangeRate: convertedBase.rate,
+            exchangeRateTimestamp: convertedBase.timestamp,
+            exchangeRateStale: convertedBase.isStale === true || costBase.isStale === true || salePriceRate.isStale === true,
+          });
+        }
+
+        for (const [productId, requestedQuantity] of quantitiesByProduct.entries()) {
+          const product = products.find((item) => item.id === productId);
+          if (Number(product?.stock || 0) < requestedQuantity) {
+            throw new Error(`Not enough stock for ${product?.name || 'a cart item'}. Available: ${product?.stock || 0}, requested: ${requestedQuantity}.`);
+          }
+        }
+
+        const totalQuantity = preparedLines.reduce((sum, line) => sum + line.quantity, 0);
+        const subtotalAmount = Math.round(preparedLines.reduce((sum, line) => sum + line.subtotalAmount, 0) * 100) / 100;
+        const discountAmount = Math.round(preparedLines.reduce((sum, line) => sum + line.discountAmount, 0) * 100) / 100;
+        const finalAmount = Math.round(preparedLines.reduce((sum, line) => sum + line.finalAmount, 0) * 100) / 100;
+        const baseAmount = Math.round(preparedLines.reduce((sum, line) => sum + line.baseAmount, 0) * 1000000) / 1000000;
+        const costAtSaleBaseAmount = Math.round(preparedLines.reduce((sum, line) => sum + line.costAtSaleBaseAmount, 0) * 1000000) / 1000000;
+        const firstLine = preparedLines[0];
+        const lineNames = preparedLines.map((line) => line.productName);
+        const displayName = preparedLines.length === 1
+          ? firstLine.productName
+          : `${lineNames.slice(0, 2).join(', ')}${preparedLines.length > 2 ? ` +${preparedLines.length - 2} more` : ''}`;
         const sale = {
-          id: makeId('sale'), productId, productName: product.name, barcode: product.barcode || '', productCategory: product.category || '',
-          originalPrice: product.price, saleUnitPrice: effectiveUnitPrice, convertedUnitPrice: Math.round(effectiveUnitPrice * salePriceRate.rate * 100) / 100, priceCurrencyCode,
-          priceExchangeRate: salePriceRate.rate, priceExchangeRateTimestamp: salePriceRate.timestamp, priceExchangeRateStale: salePriceRate.isStale === true,
-          costAtSale: product.buyingPrice, costCurrencyCode: priceCurrencyCode,
-          costAtSaleBaseAmount: Math.round(costBase.amount * qty * 1000000) / 1000000,
-          finalAmount, currencyCode: saleCurrencyCode,
-          currencySymbol: currencyFromCode(saleCurrencyCode).symbol, currency: saleCurrencyCode,
-          baseAmount: Math.round(converted.amount * 1000000) / 1000000,
-          baseCurrencyCode: currency?.code || 'UGX', exchangeRate: converted.rate,
-          exchangeRateTimestamp: converted.timestamp,
-          exchangeRateStale: converted.isStale === true || costBase.isStale === true || salePriceRate.isStale === true,
-          discount: disc, quantity: qty, timestamp: nowIso(), paymentOption,
+          id: saleId,
+          items: preparedLines,
+          itemCount: preparedLines.length,
+          totalQuantity,
+          productId: preparedLines.length === 1 ? firstLine.productId : null,
+          productName: displayName,
+          productCategory: preparedLines.length === 1 ? firstLine.productCategory : '',
+          barcode: preparedLines.length === 1 ? firstLine.barcode : '',
+          ...(preparedLines.length === 1 ? {
+            originalPrice: firstLine.originalPrice,
+            saleUnitPrice: firstLine.saleUnitPrice,
+            convertedUnitPrice: firstLine.convertedUnitPrice,
+            priceCurrencyCode: firstLine.priceCurrencyCode,
+            priceExchangeRate: firstLine.priceExchangeRate,
+            priceExchangeRateTimestamp: firstLine.priceExchangeRateTimestamp,
+            priceExchangeRateStale: firstLine.priceExchangeRateStale,
+            costAtSale: firstLine.costAtSale,
+            costCurrencyCode: firstLine.costCurrencyCode,
+            discount: firstLine.discount,
+          } : { discount: 0 }),
+          subtotalAmount,
+          discountAmount,
+          quantity: totalQuantity,
+          finalAmount,
+          currencyCode: saleCurrencyCode,
+          currencySymbol: currencyFromCode(saleCurrencyCode).symbol,
+          currency: saleCurrencyCode,
+          baseAmount,
+          baseCurrencyCode,
+          costAtSaleBaseAmount,
+          exchangeRate: finalAmount > 0 ? baseAmount / finalAmount : 1,
+          exchangeRateTimestamp: timestamp,
+          exchangeRateStale: preparedLines.some((line) => line.exchangeRateStale),
+          priceExchangeRateStale: preparedLines.some((line) => line.priceExchangeRateStale),
+          timestamp,
+          paymentOption,
+          paymentMethod: paymentOption,
         };
-        const nextProducts = products.map((item) => item.id === productId
-          ? { ...item, stock: item.stock - qty, updatedAt: nowIso() }
-          : item);
+
+        const nextProducts = products.map((product) => {
+          const soldQuantity = quantitiesByProduct.get(product.id) || 0;
+          return soldQuantity > 0 ? { ...product, stock: Number(product.stock || 0) - soldQuantity, updatedAt: timestamp } : product;
+        });
         const nextSales = [...sales, sale];
         const linkedIncome = makeLinkedTradeIncome(sale);
-        // Read inside the shared queue, not from a rendered closure, so an
-        // income or expense saved just before this sale is never overwritten.
         const currentTransactions = getCurrentTransactions();
         if (!Array.isArray(currentTransactions)) throw new Error('Your income and expense records are still loading. Wait a moment and try again.');
         const nextTransactions = [
@@ -169,6 +256,10 @@ export const SalesProvider = ({ children }) => {
     }
   }, [products, sales, detectedCurrency?.code, currency?.code, user?.uid, makeProductsKey, storageKey, transactionsStorageKey, transactionsHydrated, getCurrentTransactions, setProductsState, setSales, setTransactionsForTrade]);
 
+  const recordSale = useCallback(async ({ productId, quantity, discount = 0, paymentOption = 'Cash', currencyCode, unitPriceOverride }) => (
+    recordSaleBatch({ items: [{ productId, quantity, discount, unitPriceOverride }], paymentOption, currencyCode })
+  ), [recordSaleBatch]);
+
   const deleteSale = useCallback(async (id) => {
     if (saleOperationInProgress.current) throw new Error('Another sale change is being saved. Wait for it to finish and try again.');
     saleOperationInProgress.current = true;
@@ -176,10 +267,17 @@ export const SalesProvider = ({ children }) => {
       return await withLocalLedgerMutationLock(user?.uid || 'guest', async () => {
         const sale = sales.find((item) => item.id === id);
         if (!sale) return;
-        const product = products.find((item) => item.id === sale.productId);
-        const nextProducts = product
-          ? products.map((item) => item.id === product.id ? { ...item, stock: item.stock + sale.quantity, updatedAt: nowIso() } : item)
-          : products;
+        const restoreByProduct = new Map();
+        const saleLines = Array.isArray(sale.items) && sale.items.length
+          ? sale.items
+          : [{ productId: sale.productId, quantity: sale.quantity }];
+        saleLines.forEach((line) => {
+          if (line?.productId) restoreByProduct.set(line.productId, (restoreByProduct.get(line.productId) || 0) + Math.max(0, Number(line.quantity || 0)));
+        });
+        const nextProducts = products.map((item) => {
+          const restoreQuantity = restoreByProduct.get(item.id) || 0;
+          return restoreQuantity > 0 ? { ...item, stock: Number(item.stock || 0) + restoreQuantity, updatedAt: nowIso() } : item;
+        });
         const nextSales = sales.filter((item) => item.id !== id);
         const currentTransactions = getCurrentTransactions();
         if (!Array.isArray(currentTransactions)) throw new Error('Your income and expense records are still loading. Wait a moment and try again.');
@@ -211,6 +309,6 @@ export const SalesProvider = ({ children }) => {
     }
   }, [sales, setSales, user?.uid, scopeId]);
 
-  const value = useMemo(() => ({ sales, setSales: setSalesSafe, recordSale, deleteSale, hydrated }), [sales, setSalesSafe, recordSale, deleteSale, hydrated]);
+  const value = useMemo(() => ({ sales, setSales: setSalesSafe, recordSale, recordSaleBatch, deleteSale, hydrated }), [sales, setSalesSafe, recordSale, recordSaleBatch, deleteSale, hydrated]);
   return <SalesContext.Provider value={value}>{children}</SalesContext.Provider>;
 };

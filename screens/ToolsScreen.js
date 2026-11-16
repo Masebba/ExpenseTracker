@@ -1,6 +1,7 @@
 import { userFacingError } from '../utils/userFacingErrors';
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View, Platform, KeyboardAvoidingView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, Card, Menu, Text, TextInput, Title } from 'react-native-paper';
 import { AuthContext } from '../AuthContext';
 import { TransactionsContext } from '../TransactionsContext';
@@ -14,6 +15,7 @@ import { ThemeContext } from '../ThemeContext';
 const currencies = Object.keys(CURRENCY_SYMBOLS);
 
 export default function ToolsScreen({ route }) {
+  const isBottomTabBudget = route?.name === 'Budget' && !route?.params?.mode;
   const mode = route?.params?.mode || (route?.name === 'Budget' ? 'budget' : 'converter');
   const { user, activeWorkspace, storageRevision } = useContext(AuthContext);
   const { transactions } = useContext(TransactionsContext);
@@ -70,7 +72,9 @@ export default function ToolsScreen({ route }) {
   const remaining = Math.max(0, savedBudget - spent);
   const progress = savedBudget > 0 ? Math.min(100, spent / savedBudget * 100) : 0;
 
-  return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'}><ScrollView contentContainerStyle={[styles.container, { backgroundColor: palette.background }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+  return <SafeAreaView edges={isBottomTabBudget ? ['top'] : []} style={{ flex: 1, backgroundColor: isBottomTabBudget ? palette.header : palette.background }}>
+    {isBottomTabBudget && <View style={[styles.budgetHeader, { backgroundColor: palette.header }]}><Title style={[styles.budgetHeaderTitle, { color: palette.headerText }]}>Budget</Title></View>}
+    <KeyboardAvoidingView style={{flex:1, backgroundColor: palette.background}} behavior={Platform.OS==='ios'?'padding':'height'}><ScrollView contentContainerStyle={[styles.container, { backgroundColor: palette.background }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
     {mode === 'converter' && <Card style={[styles.card, { backgroundColor: palette.surface }]} >
       <Card.Content>
         <TextInput label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" style={[styles.input, { backgroundColor: palette.input }]} />
@@ -98,16 +102,17 @@ export default function ToolsScreen({ route }) {
         <View style={styles.budgetRow}><Text style={{ color: palette.text }}>This {targetPeriod}</Text><Text style={[styles.spent, { color: palette.expense }]} >{reportingLoading || reportingError ? '—' : formatMoney(spent, currency)}</Text></View>
         {!!reportingError && <Text style={[styles.rateStatus, { color: palette.textMuted }]} >{reportingError}</Text>}
         {savedBudget > 0 && <>
-          <View style={[styles.track, { backgroundColor: palette.surfaceAlt }]} ><View style={[styles.fill, { width: `${progress}%`, backgroundColor: progress >= 100 ? '#c34c3a' : '#3d8050' }]} /></View>
+          <View style={[styles.track, { backgroundColor: palette.surfaceAlt }]} ><View style={[styles.fill, { width: `${progress}%`, backgroundColor: progress >= 100 ? palette.danger : palette.primary }]} /></View>
           <View style={styles.budgetRow}><Text style={{ color: palette.text }}>Remaining</Text><Text style={[styles.remaining, { color: palette.income }]} >{reportingLoading || reportingError ? '—' : formatMoney(remaining, currency)}</Text></View>
         </>}
       </Card.Content>
     </Card>}
-  </ScrollView></KeyboardAvoidingView>;
+  </ScrollView></KeyboardAvoidingView></SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24, backgroundColor: '#f4f6f3' },
+  container: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 24, backgroundColor: '#f3f8f4', flexGrow: 1 },
+  budgetHeader: { height: 56, justifyContent: 'center', paddingHorizontal: 18 }, budgetHeaderTitle: { color: '#FFFFFF', fontSize: 20, fontWeight: '800' },
   card: { borderRadius: 18, backgroundColor: '#fff', marginBottom: 14, elevation: 1 },
   input: { backgroundColor: '#f7f9f6', marginVertical: 7 }, currencyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18, marginVertical: 7 }, arrow: { fontSize: 20, color: '#59715d' }, rateStatus: { fontSize: 11, color: '#536357', lineHeight: 17, marginVertical: 5 }, rateDisclosure: { fontSize: 11, color: '#78837a', lineHeight: 16, marginTop: 3 },
   result: { borderRadius: 14, backgroundColor: '#edf4ed', padding: 15, marginTop: 8 }, resultLabel: { color: '#637369', fontSize: 12 }, resultAmount: { color: '#24432b', fontSize: 24, fontWeight: '800', marginTop: 4 },

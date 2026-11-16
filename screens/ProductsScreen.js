@@ -341,7 +341,7 @@ const styles = StyleSheet.create({
         borderColor: '#ccc',
         paddingHorizontal: 10,
     },
-    categoryText: { color: '#367f39' },
+    categoryText: { color: '#268451' },
     scannerTitle: { textAlign: 'center', marginVertical: 10 },
     categoryItem: { paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderColor: '#eee' },
     categoryItemText: { fontSize: 16 },

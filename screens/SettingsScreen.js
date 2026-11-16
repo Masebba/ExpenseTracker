@@ -248,7 +248,7 @@ export default function SettingsScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 }, safeArea:{flex:1,backgroundColor:'#2f7040'}, pageHeader:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:8,paddingTop:4,paddingBottom:4,backgroundColor:'#2f7040'}, container: { ...contentWidthStyle, flexGrow: 1, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 24, alignItems: 'center', backgroundColor: '#f4f6f3' },
+  flex: { flex: 1 }, safeArea:{flex:1,backgroundColor:'#267F4D'}, pageHeader:{height:56,flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:8,paddingTop:0,paddingBottom:0,backgroundColor:'#267F4D'}, container: { ...contentWidthStyle, flexGrow: 1, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 24, alignItems: 'center', backgroundColor: '#f4f6f3' },
   title: { flex: 1, textAlign: 'left', backgroundColor: 'transparent', margin: 0, elevation: 0, color: '#ffffff', fontSize: 22 },
   profileDetails:{width:'100%',paddingVertical:8,marginBottom:10,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:'#d7dfd8'},
   personalDetails:{width:'100%',paddingVertical:8,marginBottom:10}, sectionTitle:{fontSize:16,fontWeight:'700',color:'#24432b',marginBottom:8},

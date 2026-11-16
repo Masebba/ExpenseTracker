@@ -13,6 +13,7 @@ import {
   Animated,
   Easing,
 } from "react-native";
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from "react-native-svg";
 import { Button, Card, Dialog, Portal, Text } from "react-native-paper";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { TransactionsContext } from "../TransactionsContext";
@@ -27,47 +28,55 @@ import { inPeriod, formatMoney, normalizeAdvertImageUrl, CONTENT_MAX_WIDTH, cont
 import useReportingAmounts from "../hooks/useReportingAmounts";
 import { userFacingError } from "../utils/userFacingErrors";
 import { ThemeContext } from "../ThemeContext";
+import { SafeAreaView } from "react-native-safe-area-context";
+import CustomHeader from "../components/CustomHeader";
 
 const shortcuts = [
   {
     title: "Trade",
     icon: "cart-outline",
     screen: "PoSNavigator",
-    color: "#e7f1e8",
+    color: "#e8f2eb", iconColor: "#347b54",
   },
-  { title: "Income", icon: "cash-plus", screen: "Income", color: "#e2f2e9" },
-  { title: "Expense", icon: "cash-minus", screen: "Expense", color: "#f9e9e5" },
+  { title: "Income", icon: "cash-plus", screen: "Income", color: "#e6f2e9", iconColor: "#43835d" },
+  { title: "Expense", icon: "cash-minus", screen: "Expense", color: "#f7eae7", iconColor: "#b9685b" },
   {
     title: "Customers",
     icon: "account-group-outline",
     screen: "Customers",
-    color: "#e8f1f5",
+    color: "#e9f0f5", iconColor: "#587b91",
   },
   {
     title: "Suppliers",
     icon: "truck-outline",
     screen: "Suppliers",
-    color: "#f2eaf3",
+    color: "#f3edf1", iconColor: "#8a6880",
   },
   {
     title: "Account",
     icon: "wallet-outline",
     screen: "MyAccount",
-    color: "#eceafa",
+    color: "#eeedf8", iconColor: "#6c6b9a",
   },
   {
     title: "Invoices",
     icon: "file-document-edit-outline",
     screen: "Invoices",
-    color: "#edf0e4",
+    color: "#eff2e7", iconColor: "#7b8555",
   },
-  { title: "Budget", icon: "chart-donut", screen: "Budget", color: "#f5eddf" },
+  { title: "Budget", icon: "chart-donut", screen: "Budget", color: "#e8f1ef", iconColor: "#4d8178" },
   {
     title: "Convert",
     icon: "currency-usd",
     screen: "Converter",
-    color: "#e8eef8",
+    color: "#e9eef8", iconColor: "#647da7",
   },
+];
+
+const SUMMARY_PERIODS = [
+  { label: 'Today', value: 'daily' },
+  { label: 'This week', value: 'weekly' },
+  { label: 'This month', value: 'monthly' },
 ];
 
 export default function HomeDashboard({ navigation }) {
@@ -102,12 +111,7 @@ export default function HomeDashboard({ navigation }) {
   const shortcutWidth = `${(100 / shortcutColumns).toFixed(4)}%`;
   const { amounts: reportingAmounts, loading: reportingLoading, error: reportingError } = useReportingAmounts(transactions, currency?.code, "amount");
   const hasBusinessActivity = [transactions, products, sales, orders, customers, suppliers, invoices, purchases].some((items) => items.length > 0);
-  const periodOptions = [
-    { label: 'Today', value: 'daily' },
-    { label: 'This week', value: 'weekly' },
-    { label: 'This month', value: 'monthly' },
-  ];
-  const periodLabel = periodOptions.find((item) => item.value === summaryPeriod)?.label || 'Today';
+  const periodLabel = SUMMARY_PERIODS.find((item) => item.value === summaryPeriod)?.label || 'Today';
   const periodTransactions = transactions
     .filter((item) => inPeriod(item.timestamp, summaryPeriod))
     .slice()
@@ -118,14 +122,39 @@ export default function HomeDashboard({ navigation }) {
   const periodExpense = periodTransactions
     .filter((item) => item.type === 'expense')
     .reduce((sum, item) => sum + (reportingAmounts[item.id] || 0), 0);
-  const selectSummaryPeriod = (nextPeriod) => {
-    if (nextPeriod === summaryPeriod) return;
-    Animated.timing(summaryTransition, { toValue: 0, duration: 190, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(({ finished }) => {
-      if (!finished) return;
-      setSummaryPeriod(nextPeriod);
-      Animated.timing(summaryTransition, { toValue: 1, duration: 440, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-    });
-  };
+  useEffect(() => {
+    let mounted = true;
+    let timer = null;
+    const scheduleNext = () => {
+      timer = setTimeout(() => {
+        Animated.timing(summaryTransition, {
+          toValue: 0,
+          duration: 360,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (!finished || !mounted) return;
+          setSummaryPeriod((current) => {
+            const currentIndex = SUMMARY_PERIODS.findIndex((item) => item.value === current);
+            return SUMMARY_PERIODS[(currentIndex + 1 + SUMMARY_PERIODS.length) % SUMMARY_PERIODS.length].value;
+          });
+          summaryTransition.setValue(0);
+          Animated.timing(summaryTransition, {
+            toValue: 1,
+            duration: 620,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }).start(() => { if (mounted) scheduleNext(); });
+        });
+      }, 6500);
+    };
+    scheduleNext();
+    return () => {
+      mounted = false;
+      if (timer) clearTimeout(timer);
+      summaryTransition.stopAnimation();
+    };
+  }, [summaryTransition]);
 
   useEffect(() => {
     slideIndex.current = 0;
@@ -156,10 +185,14 @@ export default function HomeDashboard({ navigation }) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
+    <View style={{ flex: 1, backgroundColor: palette.background }}>
+      <SafeAreaView edges={['top']} style={{ backgroundColor: palette.header }}>
+        <CustomHeader />
+      </SafeAreaView>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
       <ScrollView
         style={[styles.page, { backgroundColor: palette.background }]}
         contentContainerStyle={[styles.container, { backgroundColor: palette.background }]}
@@ -180,52 +213,49 @@ export default function HomeDashboard({ navigation }) {
         )}
 
         <Card style={[styles.summaryCard, { backgroundColor: palette.surface }]}>
-          <Card.Content>
-            <Text style={[styles.summaryTitle, { color: palette.textMuted }]}>{periodLabel} · {currency?.code || 'UGX'}</Text>
-            <Text style={[styles.workspaceCaption, { color: palette.textMuted }]}>{activeWorkspace?.id === 'personal' ? 'Personal account' : (activeWorkspace?.name || 'Business workspace')} · Trade sales are included in income.</Text>
-            {!!reportingError && <Text style={[styles.metricCaption, { color: palette.danger }]}>{userFacingError({ message: reportingError }, 'Some totals could not be calculated right now. Please try again later.')}</Text>}
-            <View style={[styles.periodPicker, { backgroundColor: palette.surfaceAlt }]} accessibilityRole="tablist">
-              {periodOptions.map((option) => {
-                const selected = summaryPeriod === option.value;
-                return <TouchableOpacity key={option.value} onPress={() => selectSummaryPeriod(option.value)} accessibilityRole="tab" accessibilityState={{ selected }} style={[styles.periodButton, selected && { backgroundColor: palette.primary }]}>
-                  <Text style={[styles.periodButtonText, { color: selected ? (isDark ? '#101712' : '#ffffff') : palette.textMuted }]}>{option.label}</Text>
-                </TouchableOpacity>;
-              })}
-            </View>
-            <Animated.View style={{ opacity: summaryTransition, transform: [{ translateY: summaryTransition.interpolate({ inputRange: [0, 1], outputRange: [7, 0] }) }] }}>
-              <View style={styles.metrics}>
-                <View style={styles.metric}>
-                  <Text style={[styles.metricCaption, { color: palette.textMuted }]}>Income</Text>
-                  <Text numberOfLines={1} style={[styles.income, { color: palette.income }]}>{reportingLoading || reportingError ? '—' : formatMoney(periodIncome, currency)}</Text>
+          <View style={styles.summarySurface}>
+            <Svg pointerEvents="none" style={StyleSheet.absoluteFill} viewBox="0 0 420 210" preserveAspectRatio="none">
+              <Defs>
+                <SvgLinearGradient id="homeSummaryTint" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <Stop offset="0%" stopColor={isDark ? '#243b2d' : '#F0F8F2'} />
+                  <Stop offset="100%" stopColor={isDark ? '#1a2820' : '#E0F0E5'} />
+                </SvgLinearGradient>
+              </Defs>
+              <Rect x="0" y="0" width="420" height="210" fill="url(#homeSummaryTint)" />
+            </Svg>
+            <Card.Content style={styles.summaryContent}>
+              <View style={styles.summaryHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.summaryTitle, { color: palette.text }]}>{periodLabel.toUpperCase()} · {currency?.code || 'UGX'}</Text>
+                  <Text style={[styles.workspaceCaption, { color: palette.textMuted }]}>{activeWorkspace?.id === 'personal' ? 'Personal account' : (activeWorkspace?.name || 'Business workspace')} · Income & expenses</Text>
                 </View>
-                <View style={styles.metric}>
-                  <Text style={[styles.metricCaption, { color: palette.textMuted }]}>Expenses</Text>
-                  <Text numberOfLines={1} style={[styles.expense, { color: palette.expense }]}>{reportingLoading || reportingError ? '—' : formatMoney(periodExpense, currency)}</Text>
-                </View>
-                <View style={styles.metric}>
-                  <Text style={[styles.metricCaption, { color: palette.textMuted }]}>Net</Text>
-                  <Text numberOfLines={1} style={[styles.net, { color: palette.text }]}>{reportingLoading || reportingError ? '—' : formatMoney(periodIncome - periodExpense, currency)}</Text>
+                <View style={styles.slideIndicators} accessibilityLabel={`Showing ${periodLabel} summary`}>
+                  {SUMMARY_PERIODS.map((option) => <View key={option.value} style={[styles.slideDot, { backgroundColor: summaryPeriod === option.value ? palette.primary : palette.border, width: summaryPeriod === option.value ? 17 : 6 }]} />)}
                 </View>
               </View>
-              <View style={[styles.activityHeader, { borderTopColor: palette.border }]}>
-                <Text style={[styles.activityTitle, { color: palette.text }]}>Activity</Text>
-                <Text style={[styles.activityCount, { color: palette.textMuted }]}>{periodTransactions.length} transaction{periodTransactions.length === 1 ? '' : 's'}</Text>
-              </View>
-              {periodTransactions.length ? periodTransactions.slice(0, 3).map((item) => {
-                const isIncome = item.type === 'income';
-                const title = item.description || item.category || (isIncome ? 'Income' : 'Expense');
-                const when = item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-                return <View key={item.id} style={styles.activityRow}>
-                  <View style={[styles.activityIcon, { backgroundColor: palette.surfaceAlt }]}><MaterialCommunityIcons name={isIncome ? 'arrow-bottom-left' : 'arrow-top-right'} color={isIncome ? palette.income : palette.expense} size={18} /></View>
-                  <View style={styles.activityTextBox}>
-                    <Text numberOfLines={1} style={[styles.activityName, { color: palette.text }]}>{title}</Text>
-                    <Text style={[styles.activityMeta, { color: palette.textMuted }]}>{isIncome ? 'Income' : 'Expense'}{when ? ` · ${when}` : ''}</Text>
+              {!!reportingError && <Text style={[styles.metricCaption, { color: palette.danger }]}>{userFacingError({ message: reportingError }, 'Some totals could not be calculated right now. Please try again later.')}</Text>}
+              <Animated.View style={{ opacity: summaryTransition, transform: [{ translateX: summaryTransition.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }] }}>
+                <View style={styles.metrics}>
+                  <View style={styles.metric}>
+                    <Text style={[styles.metricCaption, { color: palette.textMuted }]}>Income</Text>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.income, { color: palette.income }]}>{reportingLoading || reportingError ? '—' : formatMoney(periodIncome, currency)}</Text>
                   </View>
-                  <Text numberOfLines={1} style={[styles.activityAmount, { color: isIncome ? palette.income : palette.expense }]}>{formatMoney(reportingAmounts[item.id] || 0, currency)}</Text>
-                </View>;
-              }) : <Text style={[styles.emptyActivity, { color: palette.textMuted }]}>No transactions for {periodLabel.toLowerCase()} yet.</Text>}
-            </Animated.View>
-          </Card.Content>
+                  <View style={styles.metric}>
+                    <Text style={[styles.metricCaption, { color: palette.textMuted }]}>Expenses</Text>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.expense, { color: palette.expense }]}>{reportingLoading || reportingError ? '—' : formatMoney(periodExpense, currency)}</Text>
+                  </View>
+                  <View style={styles.metric}>
+                    <Text style={[styles.metricCaption, { color: palette.textMuted }]}>Net</Text>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.net, { color: palette.text }]}>{reportingLoading || reportingError ? '—' : formatMoney(periodIncome - periodExpense, currency)}</Text>
+                  </View>
+                </View>
+                <View style={styles.summaryFooter}>
+                  <Text style={[styles.footerActivity, { color: palette.textMuted }]}>{periodTransactions.length} transaction{periodTransactions.length === 1 ? '' : 's'} in {periodLabel.toLowerCase()}</Text>
+                  <Text style={[styles.autoSlideLabel, { color: palette.textMuted }]}>AUTO SLIDE</Text>
+                </View>
+              </Animated.View>
+            </Card.Content>
+          </View>
         </Card>
 
         <View style={styles.actions}>
@@ -237,12 +267,12 @@ export default function HomeDashboard({ navigation }) {
               accessibilityRole="button"
             >
               <View
-                style={[styles.shortcutIcon, { backgroundColor: palette.surfaceAlt }]}
+                style={[styles.shortcutIcon, { backgroundColor: isDark ? palette.surfaceAlt : item.color }]}
               >
                 <MaterialCommunityIcons
                   name={item.icon}
                   size={28}
-                  color={palette.primary}
+                  color={isDark ? palette.primary : (item.iconColor || palette.primary)}
                 />
               </View>
               <Text style={[styles.shortcutText, { color: palette.text }]}>{item.title}</Text>
@@ -352,7 +382,8 @@ export default function HomeDashboard({ navigation }) {
           </Dialog>
         </Portal>
       </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -370,35 +401,31 @@ const styles = StyleSheet.create({
   setupText: { fontSize: 13, color: "#536357", lineHeight: 19 },
   setupActions: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", marginTop: 4 },
   setupStep: { flexDirection: "row", alignItems: "flex-start", marginTop: 15, paddingTop: 13, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#dce5dc" },
-  setupStepNumber: { width: 28, height: 28, borderRadius: 14, overflow: "hidden", textAlign: "center", textAlignVertical: "center", backgroundColor: "#e7f1e8", color: "#2f7040", fontWeight: "800", paddingTop: 4, marginRight: 10 },
+  setupStepNumber: { width: 28, height: 28, borderRadius: 14, overflow: "hidden", textAlign: "center", textAlignVertical: "center", backgroundColor: "#e7f1e8", color: "#267F4D", fontWeight: "800", paddingTop: 4, marginRight: 10 },
   setupStepBody: { flex: 1, gap: 3 },
   setupStepTitle: { fontSize: 14, fontWeight: "700", color: "#24432b" },
   summaryCard: {
     backgroundColor: "#fff",
-    borderRadius: 18,
-    marginBottom: 14,
+    borderRadius: 17,
+    marginBottom: 9,
     elevation: 1,
+    overflow: "hidden",
   },
+  summarySurface: { minHeight: 142, overflow: "hidden" },
+  summaryContent: { paddingTop: 12, paddingBottom: 11 },
+  summaryHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 9 },
+  slideIndicators: { flexDirection: "row", alignItems: "center", gap: 5, marginLeft: 8 },
+  slideDot: { height: 6, borderRadius: 4 },
+  summaryFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
+  footerActivity: { fontSize: 9 },
+  autoSlideLabel: { fontSize: 8, fontWeight: "800", letterSpacing: 1 },
   summaryTitle: {
     color: "#526557",
     fontSize: 12,
     fontWeight: "700",
     marginBottom: 4,
   },
-  workspaceCaption: { color: "#758078", fontSize: 11, marginBottom: 12 },
-  periodPicker: { flexDirection: 'row', alignItems: 'center', padding: 3, borderRadius: 13, marginBottom: 14, gap: 3 },
-  periodButton: { flex: 1, minHeight: 34, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, paddingVertical: 7, borderRadius: 10 },
-  periodButtonText: { fontSize: 11, fontWeight: '700' },
-  activityHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12, marginTop: 13, marginBottom: 4 },
-  activityTitle: { fontSize: 13, fontWeight: '800' },
-  activityCount: { fontSize: 10 },
-  activityRow: { flexDirection: 'row', alignItems: 'center', gap: 9, minHeight: 45, paddingVertical: 5 },
-  activityIcon: { width: 31, height: 31, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  activityTextBox: { flex: 1, minWidth: 0 },
-  activityName: { fontSize: 12, fontWeight: '600' },
-  activityMeta: { fontSize: 10, marginTop: 2 },
-  activityAmount: { maxWidth: '37%', fontSize: 11, fontWeight: '700', textAlign: 'right' },
-  emptyActivity: { fontSize: 11, paddingVertical: 11 },
+  workspaceCaption: { color: "#758078", fontSize: 10, marginTop: 2 },
   metrics: { flexDirection: "row", justifyContent: "space-between" },
   metric: { flex: 1, paddingRight: 4 },
   metricCaption: { fontSize: 11, color: "#758078", marginBottom: 5 },
@@ -418,11 +445,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   shortcutIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 58,
+    height: 58,
+    borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(90,125,102,0.12)",
   },
   shortcutText: { color: "#34463a", fontSize: 13, fontWeight: "600" },
   carouselContent: { gap: 12 },

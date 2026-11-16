@@ -1,17 +1,15 @@
 // App.js
-import React, { useContext, useMemo } from 'react';
-import { StatusBar, StyleSheet } from 'react-native';
+import React, { useCallback, useContext, useMemo } from 'react';
+import { Alert, StatusBar, StyleSheet, View } from 'react-native';
 import {
   NavigationContainer,
   DefaultTheme as NavigationDefaultTheme,
-  DarkTheme as NavigationDarkTheme,
 } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import {
   Provider as PaperProvider,
   DefaultTheme as PaperDefaultTheme,
-  DarkTheme as PaperDarkTheme,
 } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { TransactionsProvider } from './TransactionsContext';
@@ -60,7 +58,7 @@ function AppTabs() {
             Home: 'home-variant-outline',
             Transactions: 'format-list-bulleted',
             Report: 'chart-box-outline',
-            Budget: 'wallet-percent-outline',
+            Budget: 'chart-donut',
             Workspaces: 'domain',
           };
           return <MaterialCommunityIcons name={icons[route.name] || 'circle-outline'} color={color} size={size || 20} />;
@@ -86,7 +84,9 @@ function AppNavigator() {
     config: { screens: { Main: '', DeveloperStudio: 'internal/campaigns' } },
   };
   const navigationTheme = useMemo(() => {
-    const base = isDark ? NavigationDarkTheme : NavigationDefaultTheme;
+    // Keep one stable theme shape and vary only its semantic colors. This avoids
+    // swapping theme object schemas during a live navigation render.
+    const base = NavigationDefaultTheme;
     return {
       ...base,
       dark: isDark,
@@ -134,9 +134,12 @@ function WorkspaceDataProviders({ children }) {
 }
 
 function AppContent() {
-  const { isDark, palette } = useContext(ThemeContext);
+  const { isDark, palette, ready } = useContext(ThemeContext);
   const paperTheme = useMemo(() => {
-    const base = isDark ? PaperDarkTheme : PaperDefaultTheme;
+    // Build both appearances from the same React Native Paper base theme.
+    // A stable color-role schema prevents components from receiving missing
+    // MD3 roles during a live theme switch.
+    const base = PaperDefaultTheme;
     return {
       ...base,
       dark: isDark,
@@ -144,22 +147,58 @@ function AppContent() {
       colors: {
         ...base.colors,
         primary: palette.primary,
-        accent: isDark ? '#e4ba72' : '#d99b41',
+        onPrimary: isDark ? '#15231A' : '#FFFFFF',
+        primaryContainer: isDark ? '#294533' : '#DDECE1',
+        onPrimaryContainer: isDark ? '#E2F1E6' : '#1F4A31',
+        secondary: isDark ? '#B5CDBB' : '#587B65',
+        onSecondary: isDark ? '#1B2A20' : '#FFFFFF',
+        secondaryContainer: isDark ? '#304137' : '#E5F0E8',
+        onSecondaryContainer: isDark ? '#DCEAE0' : '#1B3A28',
+        tertiary: isDark ? '#D7B77A' : '#846331',
+        onTertiary: isDark ? '#33270E' : '#FFFFFF',
+        tertiaryContainer: isDark ? '#5A4927' : '#F3E6C5',
+        onTertiaryContainer: isDark ? '#F3E5BC' : '#3B2E12',
+        inversePrimary: isDark ? '#357B51' : '#B6E3C4',
+        accent: isDark ? '#D5B67A' : '#B77C32',
+        error: palette.danger,
+        onError: '#FFFFFF',
+        errorContainer: isDark ? '#5A2B28' : '#F8DEDA',
+        onErrorContainer: isDark ? '#FFDAD4' : '#410E0B',
         background: palette.background,
+        onBackground: palette.text,
         surface: palette.surface,
-        text: palette.text,
         onSurface: palette.text,
+        surfaceVariant: palette.surfaceAlt,
+        onSurfaceVariant: palette.textMuted,
+        text: palette.text,
         disabled: palette.textMuted,
+        surfaceDisabled: isDark ? '#2B382F' : '#E9EFEB',
+        onSurfaceDisabled: palette.textMuted,
         placeholder: palette.textMuted,
         outline: palette.border,
         outlineVariant: palette.border,
-        elevation: { ...base.colors.elevation, level1: palette.surface, level2: palette.surfaceAlt },
+        shadow: palette.shadow,
+        scrim: isDark ? '#000000' : '#14231A',
+        backdrop: isDark ? 'rgba(0,0,0,0.68)' : 'rgba(17,34,23,0.32)',
+        inverseSurface: isDark ? '#E8F0EA' : '#26372D',
+        inverseOnSurface: isDark ? '#26372D' : '#F4F7F4',
+        elevation: {
+          ...(base.colors?.elevation || {}),
+          level0: palette.surface,
+          level1: palette.surface,
+          level2: palette.surfaceAlt,
+          level3: palette.surfaceAlt,
+          level4: palette.surfaceAlt,
+          level5: palette.surfaceAlt,
+        },
       },
     };
   }, [isDark, palette]);
+  if (!ready) return <View style={{ flex: 1, backgroundColor: palette.background }} />;
+
   return (
     <PaperProvider theme={paperTheme}>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={palette.background} />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={palette.header} />
       <SafeAreaProvider>
         <AuthProvider>
           <AppFeaturesProvider>
@@ -171,6 +210,50 @@ function AppContent() {
   );
 }
 
+class ThemeRenderBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error) { this.props.onError?.(error); }
+  render() {
+    if (this.state.failed) return this.props.fallback || null;
+    return this.props.children;
+  }
+}
+
+function ThemeSafetyGuard({ children }) {
+  const { isDark, setDarkMode, palette } = useContext(ThemeContext);
+  const handleThemeRenderError = useCallback((error) => {
+    console.error('[Theme] Appearance render failed:', error?.message || error);
+    if (isDark) {
+      // Never strand the user on the generic startup screen. If a device- or
+      // component-specific dark rendering failure occurs, persist light mode
+      // and remount the app with its safe appearance. The original error is
+      // still logged for diagnosis.
+      Promise.resolve(setDarkMode(false)).catch((saveError) => {
+        console.warn('[Theme] Could not persist safe light appearance:', saveError?.message || saveError);
+      });
+      const detail = String(error?.message || 'Unspecified rendering error').slice(0, 180);
+      try {
+        Alert.alert('Dark mode was turned off', `FinanceTracker encountered a display problem and safely returned to light mode. Details: ${detail}`);
+      } catch (alertError) {
+        console.warn('[Theme] Could not show the recovery alert:', alertError?.message || alertError);
+      }
+    }
+  }, [isDark, setDarkMode]);
+  return (
+    <ThemeRenderBoundary
+      key={isDark ? 'dark-appearance' : 'light-appearance'}
+      onError={handleThemeRenderError}
+      fallback={<View style={{ flex: 1, backgroundColor: palette.background }} />}
+    >
+      {children}
+    </ThemeRenderBoundary>
+  );
+}
+
 export default function App() {
-  return <ThemeProvider><AppContent /></ThemeProvider>;
+  return <ThemeProvider><ThemeSafetyGuard><AppContent /></ThemeSafetyGuard></ThemeProvider>;
 }

@@ -67,3 +67,7 @@ The app uses native Expo modules, including `expo-sharing` for PDF sharing and `
 ### Latest crash fix and project-folder workflow
 
 The 22 October 2026 update fixes a shared dropdown filter runtime error that could make Trade, Transactions, Reports, Products, or Orders display the generic app startup error. See [FIXES_AND_VALIDATION.md](./FIXES_AND_VALIDATION.md) for checks and [PROJECT_DIRECTORY_AND_GIT_GUIDE.md](./PROJECT_DIRECTORY_AND_GIT_GUIDE.md) for instructions on choosing a canonical source folder and preserving the original Git history. The new ZIP is a copy, not a live-synced folder, and intentionally excludes `.git`.
+
+## Latest UI and Trade update
+
+See `SALES_DASHBOARD_THEME_UPDATE.md` for the multi-item checkout, consolidated 3 x 5 receipt, chart labels, automatic Home dashboard rotation, Budget tab, theme polish, dark-mode changes, validation notes, and OTA deployment instructions.

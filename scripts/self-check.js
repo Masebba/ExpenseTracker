@@ -365,14 +365,18 @@ const salesScreen = fs.readFileSync(path.join(root, "screens", "SalesScreen.js")
 check("sales entry form is modal-based", salesScreen.includes("visible={saleFormVisible}") && salesScreen.includes("Process sale"), true);
 check("trade permits manual product selection without a barcode", salesScreen.includes("Browse products") && salesScreen.includes("No barcode"), true);
 check("trade allows a per-sale selling price override", salesScreen.includes("unitPriceOverride: price") && salesScreen.includes("Unit selling price"), true);
-check("receipt reports currency conversion and stale-rate caveats", salesScreen.includes("Currency conversion:") && salesScreen.includes("One or more exchange rates were cached"), true);
+check("receipt reports currency conversion and stale-rate caveats", salesScreen.includes("Item prices converted to") && salesScreen.includes("One or more exchange rates were cached"), true);
 check("discount input is independent of payment currency picker", salesScreen.includes('label="Discount (%)"') && salesScreen.includes("Customer pays in"), true);
-check("receipt includes business information and receipt-width styling", salesScreen.includes("@page { size: 80mm auto") && salesScreen.includes("SALES RECEIPT") && salesScreen.includes("Tax ID"), true);
+check("receipt includes business information and automatic 3x5 index-card sizing", salesScreen.includes("@page { size: 3in 5in") && salesScreen.includes("width: 216, height: 360") && salesScreen.includes("SALES RECEIPT") && salesScreen.includes("Tax ID"), true);
 check("scanner waits for camera ready and uses visible full-size preview", salesScreen.includes("onCameraReady={() => setCameraReady(true)}") && salesScreen.includes("cameraPreview: { flex: 1, width: '100%' }"), true);
 const reportsScreen = fs.readFileSync(path.join(root, "screens", "ReportsScreen.js"), "utf8");
 check("detailed report exports Excel workbook", reportsScreen.includes("shareExcelXmlWorkbook") && reportsScreen.includes("Generate Excel report") && reportsScreen.includes("Raw amounts and saved base values are included") && reportsScreen.includes("Price-to-Sale FX Rate"), true);
 check("report warns about stale rates saved on transactions", reportsScreen.includes("sale.priceExchangeRateStale") && reportsScreen.includes("item.exchangeRateStale"), true);
-check("sales chart places vertical product labels inside bars", reportsScreen.includes("rotate(-90") && reportsScreen.includes('fill="#ffffff"'), true);
+check("sales chart keeps vertical product labels readable on short and tall bars", reportsScreen.includes("rotate(-90") && reportsScreen.includes("const chartBarWidth = 30") && reportsScreen.includes("const chartBarGap = 20") && reportsScreen.includes("labelFitsInsideBar") && reportsScreen.includes("palette.surfaceAlt") && reportsScreen.includes("fill=\"none\""), true);
+check("sales chart draws a text halo before the label fill for contrast", reportsScreen.includes("strokeWidth=\"2.8\"") && !reportsScreen.includes("paintOrder=\"stroke\""), true);
+check("report aggregates sales by every order line item", reportsScreen.includes("flatMap((sale) => getSaleLineItems(sale)") && reportsScreen.includes("line.productId"), true);
+check("Excel export writes one detail row per item in a multi-item sale", reportsScreen.includes("filteredSales.flatMap") && reportsScreen.includes("Line Total"), true);
+
 const excelExport = fs.readFileSync(path.join(root, "utils", "excelExport.js"), "utf8");
 check("offline Excel export creates a multi-sheet SpreadsheetML workbook", excelExport.includes('xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"') && excelExport.includes("Worksheet ss:Name") && excelExport.includes("import * as Sharing from 'expo-sharing'"), true);
 const incomeScreen = fs.readFileSync(path.join(root, "screens", "IncomeScreen.js"), "utf8");
@@ -388,17 +392,43 @@ check("product state helper confirms successful durable state application", fs.r
 check("the sales screen exposes safe sale deletion and stock restoration", salesScreen.includes("confirmDeleteSale") && salesScreen.includes("restore") && salesScreen.includes("deleteSale(sale.id)"), true);
 check("receipts include saved personal details or active workspace business details", salesScreen.includes("...(personalDetails || {})") && salesScreen.includes("activeWorkspace?.details"), true);
 check("historical sales are reconciled into the active workspace income ledger", salesContext.includes("Reconcile historical sales in every active scope") && salesContext.includes("reconciledIncomeScopes") && salesContext.includes("missingSales.map(makeLinkedTradeIncome)"), true);
+check("trade supports multi-item sale orders in one journalled operation", salesContext.includes("recordSaleBatch") && salesContext.includes("items = []") && salesContext.includes("quantitiesByProduct") && salesContext.includes("items: preparedLines"), true);
+check("deleting multi-item orders restores stock for every product line", salesContext.includes("const saleLines = Array.isArray(sale.items)") && salesContext.includes("restoreByProduct"), true);
+check("checkout cart adds and removes multiple products before one completion", salesScreen.includes("addCurrentItemToCart") && salesScreen.includes("cartItems.map") && salesScreen.includes("handleCompleteSale") && salesScreen.includes("Complete sale and print one receipt"), true);
+check("one receipt prints all grouped sale lines", salesScreen.includes("const lines = getSaleLineItems(sale)") && salesScreen.includes("receiptItems") && salesScreen.includes("lines.length"), true);
+check("sales history search finds products inside multi-item receipts", salesScreen.includes("getSaleLineItems(sale).map((line) =>") && salesScreen.includes(".join(' ')") , true);
+check("3x5 receipt content respects printable area and includes line discounts", salesScreen.includes("width: 2.76in; max-width: 2.76in") && salesScreen.includes("itemDiscountAmount") && salesScreen.includes("width: 216, height: 360"), true);
+check("legacy single-item sales remain receipt compatible", fs.readFileSync(path.join(root, "utils", "sales.js"), "utf8").includes("Return the detail rows for a sale/order") && fs.readFileSync(path.join(root, "utils", "sales.js"), "utf8").includes("sale?.productId"), true);
+
 check("advert URLs are normalized for common file-sharing hosts", appUtils.includes("normalizeAdvertImageUrl") && appUtils.includes("drive.google.com/uc?export=view") && appUtils.includes("url.searchParams.set('raw', '1')"), true);
 check("legacy Google Drive sharing links with an id query are normalized", appUtils.includes("url.searchParams.get('id')"), true);
 const dashboard = fs.readFileSync(path.join(root, "screens", "HomeDashboard.js"), "utf8");
 check("advert banner loads normalized URL and logs image failure", dashboard.includes("normalizeAdvertImageUrl(ad.imageUrl)") && dashboard.includes("[Advert image] Could not load"), true);
-check("home dashboard labels active ledger and clarifies linked Trade income", dashboard.includes("const { activeWorkspace } = useContext(AuthContext)") && dashboard.includes("Trade sales are included in income."), true);
+check("home dashboard labels the active ledger and auto-summary period", dashboard.includes("const { activeWorkspace } = useContext(AuthContext)") && dashboard.includes("Income & expenses") && dashboard.includes("SUMMARY_PERIODS"), true);
 check("advert image overlay no longer obscures most of the image", dashboard.includes("rgba(255, 255, 255, 0.46)"), true);
-check("home summary has a slow fade and vertical transition for period changes", dashboard.includes("duration: 190") && dashboard.includes("duration: 440") && dashboard.includes("Easing.out(Easing.cubic)"), true);
+check("home summary automatically slides through periods with a slow fade and horizontal transition", dashboard.includes("duration: 360") && dashboard.includes("duration: 620") && dashboard.includes("setTimeout") && dashboard.includes("6500"), true);
+check("scanned products are added automatically to the sale cart without a second tap", salesScreen.includes("addScannedProductToCart(match)") && salesScreen.includes("scanLockRef.current") && salesScreen.includes("Scanned products are added automatically"), true);
+check("manually selected products retain a manual add action and cart removal", salesScreen.includes("Add manual item") && salesScreen.includes("manualItemSelected && scannedProduct") && salesScreen.includes("removeCartItem(line.cartId)"), true);
+check("Budget bottom tab receives top safe-area inset", fs.readFileSync(path.join(root, "screens", "ToolsScreen.js"), "utf8").includes("edges={isBottomTabBudget ? ['top'] : []}"), true);
+check("screen title bars use consistent 56-point height and Home header is compact", fs.readFileSync(path.join(root, "screens", "ReportsScreen.js"), "utf8").includes("height: 56") && fs.readFileSync(path.join(root, "screens", "TransactionsScreen.js"), "utf8").includes("height: 56") && fs.readFileSync(path.join(root, "screens", "HomeScreen.js"), "utf8").includes("headerShown: false") && fs.readFileSync(path.join(root, "screens", "HomeDashboard.js"), "utf8").includes("<CustomHeader />") && fs.readFileSync(path.join(root, "components", "CustomHeader.js"), "utf8").includes("height: 74"), true);
+check("header filter uses high-contrast white text on green header", fs.readFileSync(path.join(root, "components", "CompactFilterMenu.js"), "utf8").includes("onHeader ? palette.headerText : palette.text") && fs.readFileSync(path.join(root, "screens", "ReportsScreen.js"), "utf8").includes("onHeader />"), true);
 check("persistent dark mode context stores theme choice locally", fs.readFileSync(path.join(root, "ThemeContext.js"), "utf8").includes("expenseTracker.uiTheme") && fs.readFileSync(path.join(root, "ThemeContext.js"), "utf8").includes("AsyncStorage.setItem(THEME_KEY, nextMode)"), true);
+check("light palette softens the green without bleaching it", fs.readFileSync(path.join(root, "ThemeContext.js"), "utf8").includes("#268451") && fs.readFileSync(path.join(root, "ThemeContext.js"), "utf8").includes("#267F4D"), true);
+check("dark theme retains explicit surface and elevation fallbacks", fs.readFileSync(path.join(root, "App.js"), "utf8").includes("base.colors?.elevation || {}") && fs.readFileSync(path.join(root, "App.js"), "utf8").includes("surfaceVariant: palette.surfaceAlt") && fs.readFileSync(path.join(root, "App.js"), "utf8").includes("ThemeSafetyGuard") && fs.readFileSync(path.join(root, "App.js"), "utf8").includes("key={isDark ? 'dark-appearance' : 'light-appearance'}"), true);
+check("Budget tab shows its own page heading and matches Home shortcut icon", fs.readFileSync(path.join(root, "screens", "ToolsScreen.js"), "utf8").includes("isBottomTabBudget &&") && fs.readFileSync(path.join(root, "screens", "ToolsScreen.js"), "utf8").includes("styles.budgetHeaderTitle") && fs.readFileSync(path.join(root, "App.js"), "utf8").includes("Budget: 'chart-donut'"), true);
+check("Home shortcuts use soft distinct icon tints and subtle gradient background", dashboard.includes("item.iconColor || palette.primary") && dashboard.includes("SvgLinearGradient") && dashboard.includes("summarySurface"), true);
+
 check("Settings is available in header menu rather than the bottom tabs", fs.readFileSync(path.join(root, "App.js"), "utf8").includes('<BottomTab.Screen name="Budget"') && !fs.readFileSync(path.join(root, "App.js"), "utf8").includes('<BottomTab.Screen name="Settings"'), true);
 const customHeader = fs.readFileSync(path.join(root, "components", "CustomHeader.js"), "utf8");
 check("home avatar opens image picker directly", customHeader.includes("pickProfilePhoto") && customHeader.includes("launchImageLibraryAsync"), true);
+check("personal profile header shows a useful private-ledger subtitle", customHeader.includes("Personal account · Private ledger") && customHeader.includes("Guest account · Saved on this device"), true);
+
+const otaExpoConfig = JSON.parse(fs.readFileSync(path.join(root, "app.json"), "utf8")).expo;
+const otaEasConfig = JSON.parse(fs.readFileSync(path.join(root, "eas.json"), "utf8"));
+check("JavaScript-only improvements preserve the installed runtime version", otaExpoConfig.runtimeVersion === "1.0.4" && otaExpoConfig.updates?.url?.includes("u.expo.dev"), true);
+check("production updates target the existing production channel", otaEasConfig.build?.production?.channel === "production" && otaEasConfig.build?.production?.environment === "production", true);
+check("printing and SVG dependencies are already declared without adding native modules", fs.readFileSync(path.join(root, "package.json"), "utf8").includes("expo-print") && fs.readFileSync(path.join(root, "package.json"), "utf8").includes("react-native-svg"), true);
+
 check("header has direct sale shortcut and settings menu", customHeader.includes("openProcessSale: true") && customHeader.includes("dots-vertical") && customHeader.includes("All settings"), true);
 check("push token registration persists token and enabled status", fs.readFileSync(path.join(root, "services", "pushNotifications.js"), "utf8").includes("getExpoPushTokenAsync({ projectId })") && fs.readFileSync(path.join(root, "services", "pushNotifications.js"), "utf8").includes("pushTokens"), true);
 check("received push alerts enter the in-app notification inbox", fs.readFileSync(path.join(root, "AppFeaturesContext.js"), "utf8").includes("addNotificationReceivedListener") && fs.readFileSync(path.join(root, "AppFeaturesContext.js"), "utf8").includes("source: 'push'"), true);
@@ -631,7 +661,17 @@ const runCurrencyChecks = async () => {
     failures.forEach((failure) => console.error(` - ${failure}`));
     process.exit(1);
   }
-  console.log(`Currency-aware self-check passed (${assertions} assertions).`);
+  
+const darkModeContext = fs.readFileSync(path.join(root, "ThemeContext.js"), "utf8");
+check("brighter brand green keeps white header text at accessible contrast", darkModeContext.includes("#268451") && darkModeContext.includes("#267F4D") && darkModeContext.includes("headerText: '#FFFFFF'"), true);
+check("dark-mode failure rolls back to the safe light appearance", fs.readFileSync(path.join(root, "App.js"), "utf8").includes("setDarkMode(false)") && fs.readFileSync(path.join(root, "App.js"), "utf8").includes("Dark mode was turned off"), true);
+check("startup boundary exposes a redacted diagnostic in production builds", fs.readFileSync(path.join(root, "index.js"), "utf8").includes("safeDiagnostic") && fs.readFileSync(path.join(root, "index.js"), "utf8").includes("[hidden]"), true);
+check("uncaught startup failure resets a saved dark theme to light for recovery", fs.readFileSync(path.join(root, "index.js"), "utf8").includes("THEME_STORAGE_KEY") && fs.readFileSync(path.join(root, "index.js"), "utf8").includes("AsyncStorage.setItem(THEME_STORAGE_KEY, 'light')"), true);
+check("Home top controls render once in a fixed safe-area header", fs.readFileSync(path.join(root, "screens", "HomeScreen.js"), "utf8").includes("headerShown: false") && fs.readFileSync(path.join(root, "screens", "HomeDashboard.js"), "utf8").includes("<CustomHeader />") && fs.readFileSync(path.join(root, "components", "CustomHeader.js"), "utf8").includes("height: 74"), true);
+check("Budget bottom-tab title is a fixed 56-point green header", fs.readFileSync(path.join(root, "screens", "ToolsScreen.js"), "utf8").includes("styles.budgetHeader") && fs.readFileSync(path.join(root, "screens", "ToolsScreen.js"), "utf8").includes("height: 56"), true);
+check("sales history graph uses narrower 30-point bars", fs.readFileSync(path.join(root, "screens", "ReportsScreen.js"), "utf8").includes("const chartBarWidth = 30") && fs.readFileSync(path.join(root, "screens", "ReportsScreen.js"), "utf8").includes("const chartBarGap = 20"), true);
+
+console.log(`Currency-aware self-check passed (${assertions} assertions).`);
 };
 
 runCurrencyChecks().catch((error) => {

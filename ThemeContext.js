@@ -5,22 +5,23 @@ const THEME_KEY = 'expenseTracker.uiTheme';
 
 export const lightPalette = {
   mode: 'light', dark: false,
-  primary: '#2f7040', primaryStrong: '#245b33',
-  background: '#f4f6f3', surface: '#ffffff', surfaceAlt: '#edf2ed',
-  text: '#26372b', textMuted: '#758078', border: '#d9e2d9',
-  input: '#f7f9f6', header: '#2f7040', headerText: '#f4fff5',
-  tabBar: '#ffffff', icon: '#315d3b', danger: '#bd4936',
-  income: '#267a46', expense: '#bd4936', shadow: '#0b2412',
+  // Brighter emerald-green identity with enough depth for white header text.
+  primary: '#268451', primaryStrong: '#1F7044',
+  background: '#F3F9F4', surface: '#FFFFFF', surfaceAlt: '#DDEFE3',
+  text: '#20372A', textMuted: '#65796B', border: '#BFD7C6',
+  input: '#F7FBF8', header: '#267F4D', headerText: '#FFFFFF',
+  tabBar: '#FFFFFF', icon: '#268451', danger: '#B94F46',
+  income: '#23834D', expense: '#C05B50', shadow: '#10261A',
 };
 
 export const darkPalette = {
   mode: 'dark', dark: true,
-  primary: '#8fcca0', primaryStrong: '#b0e0ba',
-  background: '#101712', surface: '#1b251e', surfaceAlt: '#253128',
-  text: '#e8f0e9', textMuted: '#a3b0a6', border: '#344338',
-  input: '#202b23', header: '#15271a', headerText: '#eff8f0',
-  tabBar: '#172019', icon: '#b6dbbe', danger: '#ff9382',
-  income: '#8fcca0', expense: '#ff9382', shadow: '#000000',
+  primary: '#9CCBAE', primaryStrong: '#B4DCC1',
+  background: '#101914', surface: '#1B2620', surfaceAlt: '#25332B',
+  text: '#E8F0EA', textMuted: '#A7B4AA', border: '#39483E',
+  input: '#202D25', header: '#1D3A2A', headerText: '#F2F8F3',
+  tabBar: '#17221B', icon: '#B1D9BD', danger: '#EF9486',
+  income: '#9CCBAE', expense: '#EF9486', shadow: '#000000',
 };
 
 export const ThemeContext = createContext({
@@ -47,10 +48,15 @@ export function ThemeProvider({ children }) {
   }, []);
 
   const setDarkMode = useCallback(async (enabled) => {
-    const nextMode = enabled ? 'dark' : 'light';
+    const nextMode = enabled === true || enabled === 'dark' ? 'dark' : 'light';
     setMode(nextMode);
-    try { await AsyncStorage.setItem(THEME_KEY, nextMode); }
-    catch (error) { console.warn('[Theme] Could not save theme preference:', error?.message || error); }
+    try {
+      await AsyncStorage.setItem(THEME_KEY, nextMode);
+      return true;
+    } catch (error) {
+      console.warn('[Theme] Could not save theme preference:', error?.message || error);
+      return false;
+    }
   }, []);
 
   const toggleDarkMode = useCallback(() => setDarkMode(mode !== 'dark'), [mode, setDarkMode]);

@@ -141,7 +141,7 @@ export default function TransactionsScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#2f7040" },
+  safeArea: { flex: 1, backgroundColor: "#267F4D" },
   container: {
     flex: 1,
     ...contentWidthStyle,
@@ -156,10 +156,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginHorizontal: -18,
     paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 10,
+    height: 56,
+    paddingTop: 0,
+    paddingBottom: 0,
     marginBottom: 12,
-    backgroundColor: "#2f7040",
+    backgroundColor: "#267F4D",
   },
   title: { fontSize: 22, color: "#ffffff" },
   toolbar: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },

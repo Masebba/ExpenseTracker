@@ -91,7 +91,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   link: {
-    color: '#2f7040',
+    color: '#267F4D',
     marginTop: 10,
     textAlign: 'center'
   },

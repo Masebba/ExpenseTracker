@@ -34,4 +34,4 @@ export default function PoSNavigator() {
     );
 }
 
-const styles = { safeArea: { flex: 1, backgroundColor: '#2f7040' } };
+const styles = { safeArea: { flex: 1, backgroundColor: '#267F4D' } };

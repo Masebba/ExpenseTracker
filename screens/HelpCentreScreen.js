@@ -106,8 +106,8 @@ export default function HelpCentreScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  safeArea: { flex: 1, backgroundColor: '#2f7040' },
-  pageHeader: { paddingHorizontal: 18, paddingVertical: 10, backgroundColor: '#2f7040' },
+  safeArea: { flex: 1, backgroundColor: '#267F4D' },
+  pageHeader: { height: 56, justifyContent: 'center', paddingHorizontal: 18, paddingVertical: 0, backgroundColor: '#267F4D' },
   title: { color: '#ffffff', fontSize: 22, margin: 0 },
   container: { ...contentWidthStyle, flexGrow: 1, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 28, backgroundColor: '#f4f6f3' },
   intro: { color: '#647168', lineHeight: 21, marginBottom: 8 },
