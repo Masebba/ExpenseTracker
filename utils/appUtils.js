@@ -165,12 +165,12 @@ export const normalizeAdvertImageUrl = (value) => {
     if (host === 'drive.google.com' || host === 'docs.google.com') {
       const match = url.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
       const fileId = match?.[1] || url.searchParams.get('id');
-      if (fileId) return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`;
+      if (fileId) return `https://drive.google.com/thumbnail?id=${encodeURIComponent(fileId)}&sz=w1200`;
     }
     if (host === 'www.dropbox.com' || host === 'dropbox.com') {
       url.hostname = 'www.dropbox.com';
-      if (url.searchParams.has('dl')) url.searchParams.delete('dl');
-      url.searchParams.set('raw', '1');
+      url.searchParams.delete('raw');
+      url.searchParams.set('dl', '1');
     }
     return url.toString();
   } catch { return ''; }

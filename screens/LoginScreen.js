@@ -42,9 +42,10 @@ export default function LoginScreen({ navigation }) {
         style={[styles.input, { backgroundColor: palette.surface }]}
         right={
           <TextInput.Icon
-            name={showPassword ? 'eye-off' : 'eye'}
+            icon={showPassword ? 'eye-off' : 'eye'}
             onPress={() => setShowPassword(!showPassword)}
             color={palette.text}
+            forceTextInputFocus={false}
           />
         }
       />
@@ -57,8 +58,6 @@ export default function LoginScreen({ navigation }) {
       <Text onPress={() => navigation.navigate('Signup')} style={[styles.link, { color: palette.primary }]} >
         Don't have an account? Sign Up
       </Text>
-      <Text style={[styles.guestCopy, { color: palette.textMuted }]} >You can use a personal ledger without creating an account. Records stay on this device unless you export or back them up.</Text>
-      <Text style={[styles.guestCopy, { color: palette.textMuted }]} >If you started a guest ledger on this device, signing in copies it into this account's local records. Existing account records with matching IDs are kept.</Text>
       {!!guestTransferError && <Text accessibilityRole="alert" style={styles.transferError}>{guestTransferError}</Text>}
       <Button mode="outlined" onPress={() => startGuestMode().catch((error) => Alert.alert('Could not start local mode', userFacingError(error, 'Please check your details and try again.')))} style={styles.guestButton}>
         Continue without an account

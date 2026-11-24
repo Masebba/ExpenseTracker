@@ -1,7 +1,8 @@
 import { userFacingError } from '../utils/userFacingErrors';
 // screens/ProductsScreen.js
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { View, StyleSheet, FlatList, Alert, TouchableOpacity } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { Card, Button, Text, TextInput, Title, Modal, Portal } from 'react-native-paper';
 import BarcodeScannerComponent from '../BarcodeScannerComponent';
 import { ProductsContext } from '../ProductsContext'; // Global context for products
@@ -16,6 +17,7 @@ export default function ProductsScreen() {
     // For a local version, you can continue using local state.
     const { products, setProducts, categories: categoriesList, addCategory, updateCategory, deleteCategory } = useContext(ProductsContext);
     const { palette, isDark } = useContext(ThemeContext);
+    const isFocused = useIsFocused();
 
     const { currency, detectedCurrency } = useContext(CurrencyContext);
     // Local state for adding/editing product
@@ -35,6 +37,10 @@ export default function ProductsScreen() {
     // Modal visibility for product add/edit and barcode scanning
     const [productModalVisible, setProductModalVisible] = useState(false);
     const [scannerModalVisible, setScannerModalVisible] = useState(false);
+
+    useEffect(() => {
+        if (!isFocused && scannerModalVisible) setScannerModalVisible(false);
+    }, [isFocused, scannerModalVisible]);
 
     const handleScanBarcode = () => {
         setScannerModalVisible(true);
@@ -268,12 +274,12 @@ export default function ProductsScreen() {
     const renderScannerModal = () => (
         <Portal>
             <Modal
-                visible={scannerModalVisible}
+                visible={scannerModalVisible && isFocused}
                 onDismiss={() => setScannerModalVisible(false)}
                 contentContainerStyle={styles.fullScreenModal}
             >
                 <Title style={styles.scannerTitle}>Scan Barcode</Title>
-                <BarcodeScannerComponent onScanned={onBarcodeScanned} />
+                {scannerModalVisible && isFocused ? <BarcodeScannerComponent onScanned={onBarcodeScanned} /> : null}
                 <Button onPress={() => setScannerModalVisible(false)} style={styles.button}>
                     Cancel
                 </Button>

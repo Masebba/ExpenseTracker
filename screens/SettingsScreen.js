@@ -252,7 +252,7 @@ const styles = StyleSheet.create({
   title: { flex: 1, textAlign: 'left', backgroundColor: 'transparent', margin: 0, elevation: 0, color: '#ffffff', fontSize: 22 },
   profileDetails:{width:'100%',paddingVertical:8,marginBottom:10,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:'#d7dfd8'},
   personalDetails:{width:'100%',paddingVertical:8,marginBottom:10}, sectionTitle:{fontSize:16,fontWeight:'700',color:'#24432b',marginBottom:8},
-  infoText: { fontSize: 14, marginBottom: 5 },
+  infoText: { fontSize: 13, marginBottom: 3 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 2 },
   editRow: { width: '100%', marginTop: 8 },
   input: { width: '100%', marginBottom: 6, backgroundColor: '#f7f9f6', height:50 },
@@ -264,5 +264,5 @@ const styles = StyleSheet.create({
   storageTitle: { fontSize: 15, fontWeight: '700', marginBottom: 5, color: '#24432b' },
   storageRow: { flexDirection: 'row', alignItems: 'center',paddingVertical:8 },
   storageChoice:{flexDirection:'row',alignItems:'center',paddingVertical:7},externalRow:{flexDirection:'row',alignItems:'center',paddingVertical:8,borderTopWidth:StyleSheet.hairlineWidth,borderBottomWidth:StyleSheet.hairlineWidth,borderColor:'#dce4dd'},
-  storageHint: { color: '#68756b', fontSize: 12 },
+  storageHint: { color: '#68756b', fontSize: 11 },
 });

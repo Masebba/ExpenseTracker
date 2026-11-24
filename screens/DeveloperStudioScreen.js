@@ -22,6 +22,8 @@ export default function DeveloperStudioScreen({ navigation }) {
   const { ads, addAd, updateAd, removeAd } = useContext(AppFeaturesContext);
   const [access, setAccess] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [advertFormExpanded, setAdvertFormExpanded] = useState(false);
+  const [termsEditorExpanded, setTermsEditorExpanded] = useState(false);
   const [title, setTitle] = useState('');
   const [business, setBusiness] = useState('');
   const [description, setDescription] = useState('');
@@ -111,6 +113,7 @@ export default function DeveloperStudioScreen({ navigation }) {
     setTermsError('');
     try {
       await publishTermsOfService(termsBody, user?.uid);
+      setTermsEditorExpanded(false);
       Alert.alert('Terms published', 'Users will see the updated terms in the app.');
     } catch (error) {
       setTermsError(userFacingError(error, 'Could not publish the terms. Check your connection and try again.'));
@@ -119,7 +122,7 @@ export default function DeveloperStudioScreen({ navigation }) {
     }
   };
 
-  const resetForm = () => { setTitle(''); setBusiness(''); setDescription(''); setImageUrl(''); setPreviewUrl(''); setPreviewFailed(false); setPreviewLoaded(false); setLinkUrl(''); setEditing(null); setStartsAt(''); setEndsAt(''); };
+  const resetForm = () => { setTitle(''); setBusiness(''); setDescription(''); setImageUrl(''); setPreviewUrl(''); setPreviewFailed(false); setPreviewLoaded(false); setLinkUrl(''); setEditing(null); setStartsAt(''); setEndsAt(''); setAdvertFormExpanded(false); };
   const openDatePicker = (field) => {
     const current = parseDate(field === 'start' ? startsAt : endsAt || startsAt);
     setCalendarMonth(new Date(current.getFullYear(), current.getMonth(), 1));
@@ -149,7 +152,9 @@ export default function DeveloperStudioScreen({ navigation }) {
       <Text style={styles.copy}>Need help with the administrator tools?</Text>
       <Button mode="outlined" icon="help-circle-outline" onPress={() => navigation.navigate('HelpCentre')}>Open Help Centre</Button>
     </Card.Content></Card>
-    <Card style={styles.card}><Card.Title title="New advert" subtitle="Shown to app users on the home screen." /><Card.Content>
+    <Card style={styles.card}><Card.Title title={editing ? "Edit advert" : "New advert"} /><Card.Content>
+      <Button mode={advertFormExpanded ? 'outlined' : 'contained'} icon={advertFormExpanded ? 'chevron-up' : 'plus'} onPress={() => setAdvertFormExpanded((expanded) => !expanded)}>{advertFormExpanded ? 'Hide advert form' : (editing ? 'Continue editing' : 'Add new advert')}</Button>
+      {advertFormExpanded && <>
       <TextInput label="Business name (optional)" value={business} onChangeText={setBusiness} style={styles.businessInput} />
       <TextInput label="Banner headline (optional)" value={title} onChangeText={setTitle} style={styles.input} />
       <TextInput label="Advert details" value={description} onChangeText={setDescription} multiline numberOfLines={5} textAlignVertical="top" style={styles.multiline} />
@@ -166,6 +171,7 @@ export default function DeveloperStudioScreen({ navigation }) {
       <View style={styles.dateRow}><View style={styles.dateField}><Text style={styles.dateCaption}>Ends</Text><Button compact mode="outlined" icon="calendar-month-outline" disabled={!startsAt} onPress={()=>openDatePicker('end')}>{endsAt || (startsAt?'Choose date':'Choose a start date first')}</Button></View>{!!endsAt && <IconButton icon="close-circle-outline" size={18} onPress={()=>setEndsAt('')}/>}</View>
       {!!editing && <Button compact onPress={resetForm}>Cancel editing</Button>}
       <Button mode="contained" loading={busy} disabled={busy || (!title.trim() && !business.trim()) || (!!imageUrl.trim() && (previewUrl !== normalizeAdvertImageUrl(imageUrl) || !previewLoaded || previewFailed))} onPress={publish}>{editing?'Save changes':'Publish advert'}</Button>
+      </>}
     </Card.Content></Card>
     <Card style={styles.card}><Card.Title title="Adoption" subtitle="Aggregate counts only. No account details or record contents are read." /><Card.Content>
       {!!countsError && <Text style={styles.diagnostic}>{countsError}</Text>}
@@ -184,16 +190,18 @@ export default function DeveloperStudioScreen({ navigation }) {
       {!counts && !countsError && <Text style={styles.copy}>Counts have not been loaded yet.</Text>}
       <Button mode="outlined" icon="chart-bar" loading={loadingCounts} onPress={loadCounts}>{counts ? 'Refresh counts' : 'Load counts'}</Button>
     </Card.Content></Card>
-    <Card style={styles.card}><Card.Title title="Terms of Service & Data" subtitle="Updates are shown to users in Workspaces and Settings." /><Card.Content>
-      <Text style={styles.copy}>Edit the current user-facing terms and publish them to Firebase. The default text is used until the first version is published.</Text>
-      {!termsLoaded && !termsError && <Text style={styles.copy}>Loading the current terms…</Text>}
+    <Card style={styles.card}><Card.Title title="Terms of Service & Data" /><Card.Content>
       {!!termsUpdatedAt && <Text style={styles.copy}>Last published {new Date(termsUpdatedAt).toLocaleString()}.</Text>}
+      {!termsLoaded && !termsError && <Text style={styles.copy}>Loading current terms…</Text>}
       {!!termsError && <Text accessibilityRole="alert" style={styles.diagnostic}>{termsError}</Text>}
-      <TextInput label="Terms shown to users" value={termsBody} onChangeText={setTermsBody} editable={termsLoaded} multiline numberOfLines={14} textAlignVertical="top" style={styles.multiline} />
-      <Button mode="contained" loading={savingTerms} disabled={!termsLoaded || savingTerms || !termsBody.trim()} onPress={saveTerms}>Publish terms</Button>
+      <Button mode={termsEditorExpanded ? 'outlined' : 'contained'} icon={termsEditorExpanded ? 'chevron-up' : 'pencil'} onPress={() => setTermsEditorExpanded((expanded) => !expanded)}>{termsEditorExpanded ? 'Hide terms editor' : 'Edit terms and data policy'}</Button>
+      {termsEditorExpanded && <>
+        <TextInput label="Terms shown to users" value={termsBody} onChangeText={setTermsBody} editable={termsLoaded} multiline numberOfLines={14} textAlignVertical="top" style={styles.multiline} />
+        <Button mode="contained" loading={savingTerms} disabled={!termsLoaded || savingTerms || !termsBody.trim()} onPress={saveTerms}>Publish terms</Button>
+      </>}
     </Card.Content></Card>
     <Card style={styles.card}><Card.Title title="Published adverts" /><Card.Content>
-      {ads.filter((ad) => ad.createdBy === user?.uid).map((ad) => <View key={ad.id} style={styles.row}><View style={styles.info}><Text style={styles.adBusiness}>{ad.businessName || 'Advert'}</Text>{!!ad.title && <Text style={styles.adHeadline}>{ad.title}</Text>}<Text style={styles.copy}>{ad.description || 'No description'}{ad.startsAt?`\nStarts ${ad.startsAt}`:''}{ad.endsAt?` · Ends ${ad.endsAt}`:''}</Text></View><Button compact onPress={()=>{setEditing(ad.id);setTitle(ad.title||'');setBusiness(ad.businessName||'');setDescription(ad.description||'');setImageUrl(ad.imageUrl||'');setLinkUrl(ad.linkUrl||'');setStartsAt(ad.startsAt||'');setEndsAt(ad.endsAt||'');}}>Edit</Button><Button compact textColor="#b3261e" onPress={() => removeAd(ad.id)}>Remove</Button></View>)}
+      {ads.filter((ad) => ad.createdBy === user?.uid).map((ad) => <View key={ad.id} style={styles.row}><View style={styles.info}><Text style={styles.adBusiness}>{ad.businessName || 'Advert'}</Text>{!!ad.title && <Text style={styles.adHeadline}>{ad.title}</Text>}<Text style={styles.copy}>{ad.description || 'No description'}{ad.startsAt?`\nStarts ${ad.startsAt}`:''}{ad.endsAt?` · Ends ${ad.endsAt}`:''}</Text></View><Button compact onPress={()=>{setEditing(ad.id);setTitle(ad.title||'');setBusiness(ad.businessName||'');setDescription(ad.description||'');setImageUrl(ad.imageUrl||'');setLinkUrl(ad.linkUrl||'');setStartsAt(ad.startsAt||'');setEndsAt(ad.endsAt||'');setAdvertFormExpanded(true);}}>Edit</Button><Button compact textColor="#b3261e" onPress={() => removeAd(ad.id)}>Remove</Button></View>)}
       {!ads.some((ad) => ad.createdBy === user?.uid) && <Text style={styles.copy}>No published adverts yet.</Text>}
     </Card.Content></Card>
   </ScrollView><Modal transparent animationType="fade" visible={!!datePicker} onRequestClose={()=>setDatePicker(null)}><View style={styles.modalBackdrop}><View style={styles.calendar}>

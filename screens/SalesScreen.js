@@ -3,7 +3,8 @@ import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import { View, StyleSheet, Alert, FlatList, ScrollView } from 'react-native';
 import { Button, TextInput, Title, Text, Menu, Modal, Portal, IconButton, Card } from 'react-native-paper';
 import * as Print from 'expo-print';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import BarcodeScannerComponent from '../BarcodeScannerComponent';
+import { useIsFocused } from '@react-navigation/native';
 import { ProductsContext } from '../ProductsContext';
 import { SalesContext } from '../SalesContext';
 import { CurrencyContext } from '../CurrencyContext';
@@ -25,11 +26,12 @@ const PERIOD_FILTERS = [
 ];
 
 export default function SalesScreen({ route, navigation }) {
-  const { products = [] } = useContext(ProductsContext);
+  const { products = [], hydrated: productsHydrated } = useContext(ProductsContext);
   const { sales = [], recordSaleBatch, deleteSale } = useContext(SalesContext);
   const { currency } = useContext(CurrencyContext);
   const { user, activeWorkspace, personalDetails, businessProfile } = useContext(AuthContext);
   const { palette, isDark } = useContext(ThemeContext);
+  const isFocused = useIsFocused();
 
   const [barcode, setBarcode] = useState('');
   const [quantity, setQuantity] = useState('1');
@@ -46,15 +48,29 @@ export default function SalesScreen({ route, navigation }) {
   const [productPickerVisible, setProductPickerVisible] = useState(false);
   const [productLookup, setProductLookup] = useState('');
   const [scanning, setScanning] = useState(false);
-  const [cameraReady, setCameraReady] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
+  const [scanQueue, setScanQueue] = useState([]);
+  const [scannerProcessing, setScannerProcessing] = useState(false);
+  const [scannerFeedback, setScannerFeedback] = useState('Point the camera at a product barcode.');
   const [filterPeriod, setFilterPeriod] = useState('daily');
   const [saleSearch, setSaleSearch] = useState('');
   const [cartFeedback, setCartFeedback] = useState('');
   const [manualItemSelected, setManualItemSelected] = useState(false);
   const scanLockRef = useRef(false);
+  const cartItemsRef = useRef([]);
 
   useEffect(() => { setSaleCurrencyCode(currency?.code || 'UGX'); }, [currency?.code]);
+
+  useEffect(() => {
+    if (!isFocused && scanning) {
+      setScanning(false);
+      setSaleFormVisible(false);
+      setScanQueue([]);
+      setScannerProcessing(false);
+      scanLockRef.current = false;
+    }
+  }, [isFocused, scanning]);
+
+  useEffect(() => { cartItemsRef.current = cartItems; }, [cartItems]);
 
   const findProduct = (value) => {
     const clean = String(value || '').trim().toLowerCase();
@@ -93,7 +109,7 @@ export default function SalesScreen({ route, navigation }) {
     let active = true;
     if (!scannedProduct) {
       setAmountDue(null);
-      setAmountError('Select a product to calculate the amount due.');
+      setAmountError('');
       return () => { active = false; };
     }
     const price = Number(manualPrice);
@@ -119,9 +135,24 @@ export default function SalesScreen({ route, navigation }) {
     return () => { active = false; };
   }, [discount, quantity, manualPrice, scannedProduct, saleCurrencyCode, currency?.code]);
 
+  const closeSaleScanner = () => {
+    setScanning(false);
+    setScanQueue([]);
+    setScannerProcessing(false);
+    scanLockRef.current = false;
+  };
+
+  const closeSaleForm = () => {
+    closeSaleScanner();
+    setProductPickerVisible(false);
+    setSaleFormVisible(false);
+  };
+
   const openSaleForm = () => {
+    closeSaleScanner();
     setBarcode(''); setQuantity('1'); setDiscount(''); setManualPrice(''); setPaymentOption('Cash');
-    setScannedProduct(null); setAmountDue(null); setAmountError('Select a product to calculate the amount due.');
+    setScannedProduct(null); setAmountDue(null); setAmountError('');
+    cartItemsRef.current = [];
     setCartItems([]); setCartFeedback(''); setManualItemSelected(false);
     setSaleCurrencyCode(currency?.code || 'UGX'); setSaleFormVisible(true);
   };
@@ -132,91 +163,98 @@ export default function SalesScreen({ route, navigation }) {
     navigation?.setParams?.({ openProcessSale: false });
   }, [route?.params?.openProcessSale]);
 
-  const addScannedProductToCart = async (product) => {
-    const price = Number(product?.price);
-    const qty = 1;
-    const disc = 0;
-    if (!product?.id || !Number.isFinite(price) || price <= 0) {
-      throw new Error('This product has no valid selling price. Open it in Inventory and correct the price before scanning it again.');
-    }
-    const alreadyInCart = cartItems.filter((line) => line.productId === product.id)
-      .reduce((sum, line) => sum + Number(line.quantity || 0), 0);
-    const available = Number(product.stock || 0) - alreadyInCart;
-    if (qty > available) {
-      throw new Error(`No remaining stock for ${product.name}. Available to add: ${Math.max(0, available)}.`);
-    }
-    const priceCurrencyCode = product.currencyCode || currency?.code || 'UGX';
-    const conversion = await convertAmount(price * qty, priceCurrencyCode, saleCurrencyCode);
-    const previewAmount = Number(conversion.amount);
-    const nextLine = {
-      cartId: `${product.id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      productId: product.id,
-      productName: product.name,
-      quantity: qty,
-      discount: disc,
-      unitPriceOverride: price,
-      priceCurrencyCode,
-      previewAmount,
-    };
-    setCartItems((current) => {
-      const matchingIndex = current.findIndex((line) => line.productId === product.id
-        && Number(line.unitPriceOverride) === price
-        && Number(line.discount) === disc
-        && line.priceCurrencyCode === priceCurrencyCode);
-      if (matchingIndex >= 0) {
-        return current.map((line, index) => index === matchingIndex
-          ? { ...line, quantity: Number(line.quantity || 0) + qty, previewAmount: Number(line.previewAmount || 0) + previewAmount }
-          : line);
-      }
-      return [...current, nextLine];
-    });
-    setCartFeedback(`${product.name} added automatically. Scan the next item or remove it below.`);
-    setBarcode('');
-    setQuantity('1');
-    setDiscount('');
-    setManualPrice('');
-    setScannedProduct(null);
-    setManualItemSelected(false);
-    setAmountDue(null);
-    setAmountError('Scanned products are added automatically at their inventory selling price.');
+  const queueSalesBarcode = (rawValue) => {
+    const value = String(rawValue || '').trim();
+    if (!value) return;
+
+    // The camera callback only queues a read. Inventory and cart work run in
+    // the worker below, away from the native CameraView event.
+    setScanQueue((current) => [...current, value]);
   };
 
-  const handleBarCodeScanned = async ({ data }) => {
-    if (!data || scanLockRef.current) return;
-    scanLockRef.current = true;
-    setScanning(false);
-    setCameraReady(false);
-    const match = findProduct(data);
-    if (match) {
+  useEffect(() => {
+    if (!scanning || scannerProcessing || !productsHydrated || !scanQueue.length) return;
+    const [barcodeValue, ...remaining] = scanQueue;
+    setScanQueue(remaining);
+    setScannerProcessing(true);
+
+    const addQueuedProduct = async () => {
       try {
-        await addScannedProductToCart(match);
+        const product = findProduct(barcodeValue);
+        if (!product) {
+          setScannerFeedback(`No inventory product matches ${barcodeValue}.`);
+          return;
+        }
+        const price = Number(product.price);
+        if (!product.id || !Number.isFinite(price) || price <= 0) {
+          setScannerFeedback(`${product.name} has no valid selling price.`);
+          return;
+        }
+        const priceCurrencyCode = product.currencyCode || currency?.code || 'UGX';
+        const currentCart = cartItemsRef.current;
+        const inCart = currentCart.filter((line) => line.productId === product.id)
+          .reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+        if (inCart >= Number(product.stock || 0)) {
+          setScannerFeedback(`Cannot add ${product.name}: no remaining stock.`);
+          return;
+        }
+        const matchingIndex = currentCart.findIndex((line) => line.productId === product.id
+          && Number(line.unitPriceOverride) === price
+          && Number(line.discount) === 0
+          && line.priceCurrencyCode === priceCurrencyCode);
+        if (matchingIndex >= 0) {
+          const next = currentCart.map((line, index) => index === matchingIndex
+            ? { ...line, quantity: Number(line.quantity || 0) + 1, previewAmount: Number(line.previewAmount || 0) + Number(line.previewUnitAmount || line.previewAmount || 0) }
+            : line);
+          cartItemsRef.current = next;
+          setCartItems(next);
+          setScannerFeedback(`${product.name}: quantity increased to ${next[matchingIndex].quantity}.`);
+          return;
+        }
+        const conversion = await convertAmount(price, priceCurrencyCode, saleCurrencyCode);
+        const previewUnitAmount = Number(conversion.amount);
+        if (!Number.isFinite(previewUnitAmount)) throw new Error('The sale amount could not be calculated.');
+        const latestCart = cartItemsRef.current;
+        const latestInCart = latestCart.filter((line) => line.productId === product.id)
+          .reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+        if (latestInCart >= Number(product.stock || 0)) {
+          setScannerFeedback(`Cannot add ${product.name}: no remaining stock.`);
+          return;
+        }
+        const next = [...latestCart, {
+          cartId: `${product.id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          productId: product.id,
+          productName: product.name,
+          quantity: 1,
+          discount: 0,
+          unitPriceOverride: price,
+          priceCurrencyCode,
+          previewUnitAmount,
+          previewAmount: previewUnitAmount,
+        }];
+        cartItemsRef.current = next;
+        setCartItems(next);
+        setScannerFeedback(`${product.name} added to cart.`);
       } catch (error) {
-        Alert.alert('Could not add scanned product', userFacingError(error, 'Check product stock and selling price, then try again.'));
+        setScannerFeedback(userFacingError(error, 'Could not add this product. Check its price and currency, then scan again.'));
       } finally {
-        scanLockRef.current = false;
+        setScannerProcessing(false);
       }
-    } else {
-      setBarcode(data);
-      setManualItemSelected(false);
-      setScannedProduct(null);
-      setManualPrice('');
-      setCartFeedback('Barcode not found. Search or select the product manually.');
-      scanLockRef.current = false;
-      Alert.alert('Product not found', 'This code is not in inventory. Browse products, select a product manually, or add the product to inventory first.');
-    }
-  };
+    };
 
-  const handleScan = async () => {
-    try {
-      if (!permission?.granted) {
-        const result = await requestPermission();
-        if (!result.granted) { Alert.alert('Camera access denied', 'Enable camera access in device settings, or select a product manually.'); return; }
-      }
-      setCameraReady(false);
-      setScanning(true);
-    } catch (error) {
-      Alert.alert('Camera unavailable', userFacingError(error, 'The camera could not be opened. You can select or enter a product manually.'));
+    addQueuedProduct();
+  }, [scanQueue, scanning, scannerProcessing, products, productsHydrated, saleCurrencyCode, currency?.code]);
+
+  const handleScan = () => {
+    if (!saleFormVisible || !isFocused) return;
+    if (!productsHydrated) {
+      Alert.alert('Inventory is loading', 'Wait for inventory to finish loading, then scan the product again.');
+      return;
     }
+    setProductPickerVisible(false);
+    setScannerFeedback('Point the camera at a product barcode.');
+    setScanQueue([]);
+    setScanning(true);
   };
 
   const addCurrentItemToCart = () => {
@@ -245,6 +283,7 @@ export default function SalesScreen({ route, navigation }) {
       discount: disc,
       unitPriceOverride: price,
       priceCurrencyCode,
+      previewUnitAmount: Number(amountDue) / qty,
       previewAmount: Number(amountDue),
     };
     if (matchingIndex >= 0) {
@@ -256,10 +295,41 @@ export default function SalesScreen({ route, navigation }) {
     }
     setBarcode(''); setQuantity('1'); setDiscount(''); setManualPrice(''); setScannedProduct(null); setManualItemSelected(false); setAmountDue(null);
     setCartFeedback(`${scannedProduct.name} added to cart.`);
-    setAmountError('Select another product to continue building this sale.')
+    setAmountError('')
   };
 
-  const removeCartItem = (cartId) => setCartItems((current) => current.filter((line) => line.cartId !== cartId));
+  const updateCartItems = (updater) => {
+    setCartItems((current) => {
+      const next = updater(current);
+      cartItemsRef.current = next;
+      return next;
+    });
+  };
+
+  const removeCartItem = (cartId) => updateCartItems((current) => current.filter((line) => line.cartId !== cartId));
+  const clearCart = () => updateCartItems(() => []);
+
+  const changeCartQuantity = (cartId, nextQuantity) => {
+    const quantityValue = Number(nextQuantity);
+    const line = cartItemsRef.current.find((item) => item.cartId === cartId);
+    if (!line) return;
+    if (!Number.isInteger(quantityValue) || quantityValue < 1) {
+      removeCartItem(cartId);
+      return;
+    }
+    const product = products.find((item) => item.id === line.productId);
+    const otherQuantity = cartItemsRef.current
+      .filter((item) => item.productId === line.productId && item.cartId !== cartId)
+      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    if (!product || quantityValue + otherQuantity > Number(product.stock || 0)) {
+      setScannerFeedback(`Cannot set ${line.productName} above available stock.`);
+      return;
+    }
+    const unitAmount = Number(line.previewUnitAmount || (Number(line.previewAmount || 0) / Math.max(1, Number(line.quantity || 1))));
+    updateCartItems((current) => current.map((item) => item.cartId === cartId
+      ? { ...item, quantity: quantityValue, previewUnitAmount: unitAmount, previewAmount: unitAmount * quantityValue }
+      : item));
+  };
   const cartTotal = cartItems.reduce((sum, line) => sum + Number(line.previewAmount || 0), 0);
   const cartQuantity = cartItems.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
 
@@ -276,7 +346,8 @@ export default function SalesScreen({ route, navigation }) {
         paymentOption,
         currencyCode: saleCurrencyCode,
       });
-      setSaleFormVisible(false);
+      closeSaleForm();
+      cartItemsRef.current = [];
       setBarcode(''); setQuantity('1'); setDiscount(''); setManualPrice(''); setScannedProduct(null); setManualItemSelected(false); setAmountDue(null); setCartItems([]); setCartFeedback('');
       Alert.alert(
         'Sale processed',
@@ -402,25 +473,6 @@ export default function SalesScreen({ route, navigation }) {
     </Card>
   );
 
-  if (scanning) {
-    return (
-      <View style={styles.scannerContainer}>
-        <CameraView
-          style={styles.cameraPreview}
-          facing="back"
-          active={scanning}
-          onCameraReady={() => setCameraReady(true)}
-          onMountError={(event) => { setScanning(false); Alert.alert('Camera could not start', userFacingError(event, 'Close other apps using the camera, then retry or select a product manually.')); }}
-          barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39', 'code93', 'codabar', 'itf14', 'qr'] }}
-          onBarcodeScanned={handleBarCodeScanned}
-        />
-        {!cameraReady && <View style={styles.cameraLoading}><Text style={styles.scannerText}>Opening camera…</Text></View>}
-        <View pointerEvents="none" style={styles.scanFrame}><Text style={styles.scannerText}>Align barcode in the frame</Text></View>
-        <Button mode="contained" onPress={() => { setScanning(false); setCameraReady(false); }} style={styles.cancelScan}>Cancel scanning</Button>
-      </View>
-    );
-  }
-
   return (
     <View style={[styles.container, { backgroundColor: palette.background }]} >
       <View style={styles.headingRow}><Title style={[styles.pageTitle, { color: palette.text }]}>Sales & Transactions</Title><Text style={[styles.countText, { color: palette.textMuted }]}>{sales.length} sales</Text></View>
@@ -448,18 +500,17 @@ export default function SalesScreen({ route, navigation }) {
       />
 
       <Portal>
-        <Modal visible={saleFormVisible} onDismiss={() => { setSaleFormVisible(false); setScanning(false); }} contentContainerStyle={[styles.modal, { backgroundColor: palette.surface }]}>
+        <Modal visible={saleFormVisible && !scanning} onDismiss={() => { if (!scanning) closeSaleForm(); }} contentContainerStyle={[styles.modal, { backgroundColor: palette.surface }]}>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator contentContainerStyle={styles.modalContent}>
-            <View style={styles.modalHeading}><Title style={{ color: palette.text }}>Build sale</Title><IconButton icon="close" onPress={() => setSaleFormVisible(false)} accessibilityLabel="Close sale form" /></View>
-            <Text style={[styles.modalHint, { color: palette.textMuted }]}>Scan each product and it will be added to the cart automatically at its listed price. You can remove scanned items before completing the sale. For a custom price, quantity or discount, search/select the product manually first.</Text>
+            <View style={styles.modalHeading}><Title style={{ color: palette.text }}>Build sale</Title><IconButton icon="close" onPress={closeSaleForm} accessibilityLabel="Close sale form" /></View>
             <View style={styles.entryRow}>
               <TextInput label="Barcode or exact product name" value={barcode} onChangeText={changeProductInput} style={[styles.input, { flex: 1, backgroundColor: palette.input }]} autoCapitalize="none" autoCorrect={false} />
               <IconButton icon="magnify" size={25} onPress={() => setProductPickerVisible(true)} accessibilityLabel="Browse products" style={styles.entryIcon} />
-              <IconButton icon="barcode-scan" size={25} onPress={handleScan} accessibilityLabel="Scan barcode" style={styles.entryIcon} />
+              <IconButton icon="barcode-scan" size={25} onPress={handleScan} disabled={!productsHydrated} accessibilityLabel="Scan barcode" style={styles.entryIcon} />
             </View>
             {scannedProduct ? (
               <View style={[styles.selectedProduct, { backgroundColor: palette.surfaceAlt }]}><Text style={[styles.selectedProductName, { color: palette.text }]}>{scannedProduct.name}</Text><Text style={[styles.selectedProductMeta, { color: palette.textMuted }]}>Available {Math.max(0, Number(scannedProduct.stock || 0) - cartItems.filter((line) => line.productId === scannedProduct.id).reduce((sum, line) => sum + Number(line.quantity || 0), 0))} · List price {formatMoney(scannedProduct.price, currencyFromCode(scannedProduct.currencyCode || currency?.code))}{scannedProduct.barcode ? ` · ${scannedProduct.barcode}` : ' · No barcode'}</Text></View>
-            ) : <Text style={[styles.helper, { color: palette.textMuted }]}>A scanned barcode is added to the cart automatically. For products without a barcode, search or browse, then add the manually selected item.</Text>}
+            ) : null}
             <View style={styles.entryRow}>
               <TextInput label="Unit selling price" value={manualPrice} onChangeText={setManualPrice} keyboardType="decimal-pad" style={[styles.input, { flex: 1, backgroundColor: palette.input }]} disabled={!scannedProduct} />
               <View style={styles.priceCurrency}><Text style={[styles.currencyLabel, { color: palette.textMuted }]}>{scannedProduct?.currencyCode || currency?.code || 'UGX'}</Text></View>
@@ -471,13 +522,13 @@ export default function SalesScreen({ route, navigation }) {
               </Menu>
             </View>
             <TextInput label="Discount (%)" value={discount} onChangeText={setDiscount} keyboardType="decimal-pad" style={[styles.input, { backgroundColor: palette.input }]} />
-            {cartItems.length ? <View style={styles.lockedCurrency}><Text style={[styles.helper, { color: palette.textMuted }]}>Customer pays in {saleCurrencyCode}. To change currency, clear the cart first.</Text></View> : <CurrencyPicker value={saleCurrencyCode} onChange={setSaleCurrencyCode} label="Customer pays in" />}
+            {cartItems.length ? <Text style={[styles.currencyLabel, { color: palette.textMuted, marginBottom: 8 }]}>Currency: {saleCurrencyCode}</Text> : <CurrencyPicker value={saleCurrencyCode} onChange={setSaleCurrencyCode} label="Customer pays in" />}
             <View style={[styles.amountPanel, { backgroundColor: palette.surfaceAlt }]}>
               <Text style={[styles.amountLabel, { color: palette.textMuted }]}>Current item estimate</Text>
               <Text style={[styles.amountValue, { color: palette.text }]}>{amountDue === null ? '—' : formatMoney(amountDue, currencyFromCode(saleCurrencyCode))}</Text>
               {!!amountError && <Text style={[styles.helper, { color: palette.textMuted }]}>{amountError}</Text>}
             </View>
-            {manualItemSelected && scannedProduct && <Button mode="outlined" icon="cart-plus" disabled={amountDue === null} onPress={addCurrentItemToCart} style={styles.addCartButton}>Add manual item</Button>}
+            {manualItemSelected && scannedProduct && <Button mode="outlined" icon="cart-plus" disabled={amountDue === null} onPress={addCurrentItemToCart} style={styles.addCartButton}>Add selected product</Button>}
 
             <View style={[styles.cartPanel, { backgroundColor: palette.surfaceAlt, borderColor: palette.border }]}>
               <View style={styles.cartHeader}><View style={{ flex: 1 }}><Text style={[styles.cartTitle, { color: palette.text }]}>Sale items ({cartItems.length})</Text>{!!cartFeedback && <Text style={[styles.cartFeedback, { color: palette.income }]}>{cartFeedback}</Text>}</View><Text style={[styles.cartCount, { color: palette.textMuted }]}>{cartQuantity} unit(s)</Text></View>
@@ -490,12 +541,12 @@ export default function SalesScreen({ route, navigation }) {
                   <Text style={[styles.cartLineAmount, { color: palette.text }]}>{formatMoney(line.previewAmount, currencyFromCode(saleCurrencyCode))}</Text>
                   <IconButton icon="close-circle-outline" size={19} onPress={() => removeCartItem(line.cartId)} accessibilityLabel={`Remove ${line.productName} from cart`} />
                 </View>
-              )) : <Text style={[styles.helper, { color: palette.textMuted }]}>Your cart is empty. Scan a product to add it automatically, or select a product manually below.</Text>}
+              )) : <Text style={[styles.helper, { color: palette.textMuted }]}>Cart empty.</Text>}
               <View style={[styles.cartTotalRow, { borderTopColor: palette.border }]}><Text style={[styles.cartTitle, { color: palette.text }]}>Total due</Text><Text style={[styles.cartTotal, { color: palette.primaryStrong }]}>{formatMoney(cartTotal, currencyFromCode(saleCurrencyCode))}</Text></View>
               {cartItems.length > 0 && <Button compact mode="text" textColor={palette.danger} onPress={clearCart}>Clear cart</Button>}
             </View>
             <Button mode="contained" icon="check-circle-outline" disabled={!cartItems.length} onPress={handleCompleteSale} style={styles.submitButton}>Complete sale and print one receipt</Button>
-            <Button mode="text" onPress={() => setSaleFormVisible(false)}>Cancel</Button>
+            <Button mode="text" onPress={closeSaleForm}>Cancel</Button>
           </ScrollView>
         </Modal>
         <Modal visible={productPickerVisible} onDismiss={() => setProductPickerVisible(false)} contentContainerStyle={[styles.pickerModal, { backgroundColor: palette.surface }]}>
@@ -507,9 +558,51 @@ export default function SalesScreen({ route, navigation }) {
             style={{ maxHeight: 420 }}
             keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => <Button mode="text" contentStyle={{ justifyContent: 'flex-start' }} onPress={() => { selectProduct(item); setSaleFormVisible(true); }}>{`${item.name} · ${formatMoney(item.price, currencyFromCode(item.currencyCode || currency?.code))} · Stock ${item.stock}${item.barcode ? ` · ${item.barcode}` : ' · No barcode'}`}</Button>}
-            ListEmptyComponent={<Text style={[styles.helper, { color: palette.textMuted }]} >No matching products. Add the product to Inventory first.</Text>}
+            ListEmptyComponent={<Text style={[styles.helper, { color: palette.textMuted }]} >No products found.</Text>}
           />
           <Button onPress={() => setProductPickerVisible(false)}>Close</Button>
+        </Modal>
+        <Modal
+          visible={scanning && isFocused}
+          onDismiss={closeSaleScanner}
+          contentContainerStyle={[styles.scannerModal, { backgroundColor: palette.surface }]}
+        >
+          <View style={styles.modalHeading}>
+            <Title style={{ color: palette.text }}>Scan barcode</Title>
+            <IconButton icon="close" onPress={closeSaleScanner} accessibilityLabel="Close barcode scanner" />
+          </View>
+          <View style={styles.scannerPreview}>
+            {scanning && isFocused ? (
+              <BarcodeScannerComponent
+                onScanned={queueSalesBarcode}
+                continuous
+                scanCooldownMs={900}
+              />
+            ) : null}
+          </View>
+          <Text style={[styles.scannerFeedback, { color: palette.textMuted }]}>{scannerProcessing ? 'Adding scanned product…' : scannerFeedback}</Text>
+          <View style={[styles.scannerCart, { backgroundColor: palette.surfaceAlt, borderColor: palette.border }]}>
+            <View style={styles.cartHeader}>
+              <Text style={[styles.cartTitle, { color: palette.text }]}>Current sale ({cartQuantity} unit(s))</Text>
+              <Text style={[styles.cartTotal, { color: palette.primaryStrong }]}>{formatMoney(cartTotal, currencyFromCode(saleCurrencyCode))}</Text>
+            </View>
+            <ScrollView style={styles.scannerCartList} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+              {cartItems.length ? cartItems.map((line) => (
+                <View key={line.cartId} style={[styles.scannerCartRow, { borderBottomColor: palette.border }]}>
+                  <View style={styles.cartLineInfo}>
+                    <Text numberOfLines={1} style={[styles.cartProduct, { color: palette.text }]}>{line.productName}</Text>
+                    <Text style={[styles.cartMeta, { color: palette.textMuted }]}>{formatMoney(line.previewAmount, currencyFromCode(saleCurrencyCode))}</Text>
+                  </View>
+                  <IconButton icon="minus-circle-outline" size={22} onPress={() => changeCartQuantity(line.cartId, Number(line.quantity || 1) - 1)} accessibilityLabel={`Subtract one ${line.productName}`} />
+                  <Text style={[styles.scannerQuantity, { color: palette.text }]}>{line.quantity}</Text>
+                  <IconButton icon="plus-circle-outline" size={22} onPress={() => changeCartQuantity(line.cartId, Number(line.quantity || 0) + 1)} accessibilityLabel={`Add one ${line.productName}`} />
+                  <IconButton icon="trash-can-outline" size={20} onPress={() => removeCartItem(line.cartId)} accessibilityLabel={`Remove ${line.productName}`} />
+                </View>
+              )) : <Text style={[styles.helper, { color: palette.textMuted }]}>No products scanned yet.</Text>}
+            </ScrollView>
+          </View>
+          <Button mode="contained" icon="check" disabled={scannerProcessing || scanQueue.length > 0} onPress={closeSaleScanner} style={styles.finishScanButton}>Finish scanning & review sale</Button>
+          <Button mode="text" onPress={closeSaleScanner}>Cancel scanning</Button>
         </Modal>
       </Portal>
     </View>
@@ -529,13 +622,12 @@ const styles = StyleSheet.create({
   transactionItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, paddingHorizontal: 8 }, transactionInfo: { flex: 1 },
   transactionText: { color: '#253c2b', fontSize: 13, fontWeight: '700' }, transactionDate: { color: '#758177', fontSize: 10, marginTop: 3 },
   emptyState: { alignItems: 'center', paddingHorizontal: 18, paddingVertical: 30, gap: 8 }, emptyTitle: { fontSize: 16, fontWeight: '700', color: '#24432b' }, emptyText: { color: '#728075', textAlign: 'center', lineHeight: 20 },
-  modal: { backgroundColor: '#f7f9f6', margin: 12, borderRadius: 20, maxHeight: '94%', overflow: 'hidden' }, modalContent: { padding: 16, paddingBottom: 20 }, modalHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, modalHint: { color: '#66756a', fontSize: 12, lineHeight: 18, marginBottom: 10 },
+  modal: { backgroundColor: '#f7f9f6', margin: 12, borderRadius: 20, maxHeight: '94%', overflow: 'hidden' }, modalContent: { padding: 16, paddingBottom: 20 }, modalHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   entryRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }, input: { marginBottom: 8, backgroundColor: '#fff' }, entryIcon: { margin: 0 },
   selectedProduct: { backgroundColor: '#e7f1e8', padding: 10, borderRadius: 10, marginBottom: 10 }, selectedProductName: { color: '#24432b', fontWeight: '800' }, selectedProductMeta: { color: '#5f7163', fontSize: 11, marginTop: 3 }, helper: { color: '#6d796f', fontSize: 11, marginVertical: 5 },
   priceCurrency: { minWidth: 58, alignItems: 'center', justifyContent: 'center', marginBottom: 8 }, currencyLabel: { color: '#5f6f63', fontWeight: '700', fontSize: 12 },
   paymentButton: { height: 48, justifyContent: 'center', marginBottom: 8 }, amountPanel: { alignItems: 'center', padding: 12, backgroundColor: '#e8efe8', borderRadius: 12, marginTop: 4 }, amountLabel: { color: '#617165', fontSize: 12 }, amountValue: { color: '#24432b', fontSize: 22, fontWeight: '800', marginTop: 3 }, submitButton: { marginTop: 12, borderRadius: 20 },
   addCartButton: { marginTop: 4, marginBottom: 10, borderRadius: 18 },
-  lockedCurrency: { paddingVertical: 4 },
   cartPanel: { borderWidth: StyleSheet.hairlineWidth, padding: 10, borderRadius: 13, marginTop: 9 },
   cartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 },
   cartTitle: { fontSize: 13, fontWeight: '800' }, cartCount: { fontSize: 10 }, cartFeedback: { fontSize: 10, marginTop: 2 },
@@ -543,7 +635,12 @@ const styles = StyleSheet.create({
   cartLineInfo: { flex: 1, minWidth: 0 }, cartProduct: { fontSize: 12, fontWeight: '700' }, cartMeta: { fontSize: 10, marginTop: 2 }, cartLineAmount: { fontSize: 11, fontWeight: '700', textAlign: 'right' },
   cartTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, marginTop: 6, paddingTop: 9 }, cartTotal: { fontSize: 17, fontWeight: '800' },
   pickerModal: { backgroundColor: '#fff', margin: 16, padding: 16, borderRadius: 18, maxHeight: '85%' },
-  scannerContainer: { flex: 1, backgroundColor: '#000', position: 'relative' }, cameraPreview: { flex: 1, width: '100%' }, cameraLoading: { position: 'absolute', top: '45%', left: 0, right: 0, alignItems: 'center' },
-  scanFrame: { position: 'absolute', top: '32%', left: 26, right: 26, height: 160, borderWidth: 2, borderColor: '#fff', borderRadius: 14, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 10, backgroundColor: 'transparent' },
-  scannerText: { color: '#fff', fontSize: 13, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 }, cancelScan: { position: 'absolute', bottom: 24, alignSelf: 'center' },
+  scannerModal: { margin: 12, padding: 16, borderRadius: 20, maxHeight: '88%' },
+  scannerPreview: { height: 250, minHeight: 220, overflow: 'hidden', borderRadius: 14, marginVertical: 8 },
+  scannerFeedback: { fontSize: 12, textAlign: 'center', marginBottom: 8, minHeight: 18 },
+  scannerCart: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 8, maxHeight: 190 },
+  scannerCartList: { maxHeight: 135 },
+  scannerCartRow: { minHeight: 46, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
+  scannerQuantity: { minWidth: 20, textAlign: 'center', fontWeight: '800' },
+  finishScanButton: { marginTop: 10, borderRadius: 20 },
 });

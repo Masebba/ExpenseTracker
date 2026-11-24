@@ -1,7 +1,6 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import {
   Alert,
-  Image,
   Linking,
   ScrollView,
   StyleSheet,
@@ -30,6 +29,7 @@ import { userFacingError } from "../utils/userFacingErrors";
 import { ThemeContext } from "../ThemeContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import CustomHeader from "../components/CustomHeader";
+import AdvertImage from "../components/AdvertImage";
 
 const shortcuts = [
   {
@@ -93,20 +93,34 @@ export default function HomeDashboard({ navigation }) {
   const [selectedAd, setSelectedAd] = useState(null);
   const [failedAdImages, setFailedAdImages] = useState({});
   const [summaryPeriod, setSummaryPeriod] = useState('daily');
+  const [activeAdIndex, setActiveAdIndex] = useState(0);
   const summaryTransition = useRef(new Animated.Value(1)).current;
-  const carousel = useRef(null);
-  const slideIndex = useRef(0);
+  const advertTransition = useRef(new Animated.Value(0)).current;
   const contentWidth = Math.min(windowWidth, CONTENT_MAX_WIDTH);
   const bannerWidth = Math.max(240, contentWidth - 32);
   const bannerHeight = Math.max(125, Math.min(170, Math.round(windowHeight * 0.2)));
   const now = Date.now();
-  const visibleAds = ads.filter(
-    (ad) =>
-      ad.active &&
-      ad.publisherType === "developer" &&
-      (!ad.startsAt || new Date(ad.startsAt).getTime() <= now) &&
-      (!ad.endsAt || new Date(`${ad.endsAt}T23:59:59`).getTime() >= now),
-  );
+  const visibleAds = (Array.isArray(ads) ? ads : []).filter((ad) => {
+    // Older developer adverts may not contain these metadata fields. Because this
+    // collection is already the developer advert collection, missing values are safe
+    // to interpret as developer-owned and active; explicitly disabled adverts stay hidden.
+    const active = ad.active !== false && String(ad.active).toLowerCase() !== 'false';
+    const publisherType = String(ad.publisherType || 'developer').toLowerCase();
+    if (!active || publisherType !== 'developer') return false;
+
+    const parseScheduleDate = (value, endOfDay = false) => {
+      if (!value) return null;
+      const raw = String(value).trim();
+      const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+        ? `${raw}T${endOfDay ? '23:59:59.999' : '00:00:00'}`
+        : raw;
+      const timestamp = new Date(dateValue).getTime();
+      return Number.isFinite(timestamp) ? timestamp : null;
+    };
+    const startsAt = parseScheduleDate(ad.startsAt);
+    const endsAt = parseScheduleDate(ad.endsAt, true);
+    return (startsAt === null || startsAt <= now) && (endsAt === null || endsAt >= now);
+  });
   const shortcutColumns = contentWidth >= 640 ? 5 : contentWidth >= 420 ? 4 : 3;
   const shortcutWidth = `${(100 / shortcutColumns).toFixed(4)}%`;
   const { amounts: reportingAmounts, loading: reportingLoading, error: reportingError } = useReportingAmounts(transactions, currency?.code, "amount");
@@ -156,19 +170,98 @@ export default function HomeDashboard({ navigation }) {
     };
   }, [summaryTransition]);
 
+  const visibleAdIds = visibleAds.map((ad) => `${ad.id}:${ad.imageUrl || ad.imageURL || ad.image_url || ''}`).join('|');
   useEffect(() => {
-    slideIndex.current = 0;
-    carousel.current?.scrollTo({ x: 0, animated: false });
-    if (visibleAds.length < 2) return undefined;
-    const timer = setInterval(() => {
-      slideIndex.current = (slideIndex.current + 1) % visibleAds.length;
-      carousel.current?.scrollTo({
-        x: slideIndex.current * (bannerWidth + 12),
-        animated: true,
-      });
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [visibleAds.length, bannerWidth]);
+    let mounted = true;
+    let timer = null;
+    setActiveAdIndex(0);
+    setFailedAdImages({});
+    advertTransition.setValue(0);
+
+    if (visibleAds.length < 2) {
+      return () => { mounted = false; advertTransition.stopAnimation(); };
+    }
+
+    const scheduleNextSlide = () => {
+      timer = setTimeout(() => {
+        Animated.timing(advertTransition, {
+          toValue: 1,
+          duration: 640,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (!finished || !mounted) return;
+          advertTransition.setValue(0);
+          setActiveAdIndex((current) => (current + 1) % visibleAds.length);
+          scheduleNextSlide();
+        });
+      }, 6000);
+    };
+
+    scheduleNextSlide();
+    return () => {
+      mounted = false;
+      if (timer) clearTimeout(timer);
+      advertTransition.stopAnimation();
+    };
+  }, [visibleAdIds, visibleAds.length, advertTransition]);
+
+  const currentAd = visibleAds.length ? visibleAds[activeAdIndex % visibleAds.length] : null;
+  const nextAd = visibleAds.length > 1 ? visibleAds[(activeAdIndex + 1) % visibleAds.length] : null;
+  const getAdvertImageUrl = (ad) => {
+    const raw = String(ad?.imageUrl || ad?.imageURL || ad?.image_url || ad?.image || '').trim();
+    if (!raw) return '';
+    return normalizeAdvertImageUrl(raw);
+  };
+
+  const renderAdvertCard = (ad) => {
+    if (!ad) return null;
+    const imageUrl = getAdvertImageUrl(ad);
+    const imageKey = `${ad.id}:${ad.imageUrl || ad.imageURL || ad.image_url || ad.image || ''}`;
+    const hasImage = Boolean(imageUrl) && !failedAdImages[imageKey];
+    return (
+      <TouchableOpacity
+        key={ad.id}
+        activeOpacity={0.94}
+        onPress={() => setSelectedAd(ad)}
+        style={[styles.banner, { width: bannerWidth, height: bannerHeight }]}
+        accessibilityLabel={`Advertisement: ${ad.businessName || ad.title}`}
+      >
+        <View style={styles.adLabel}><Text style={styles.adLabelText}>Ad</Text></View>
+        {hasImage ? (
+          <View style={styles.bannerImageBackground}>
+            <AdvertImage
+              uri={imageUrl}
+              style={styles.bannerImageBackground}
+              resizeMode="cover"
+              onLoad={() => setFailedAdImages((current) => {
+                if (!current[imageKey]) return current;
+                const next = { ...current };
+                delete next[imageKey];
+                return next;
+              })}
+              onError={(event) => {
+                console.warn('[Advert image] Could not load', imageUrl, event?.nativeEvent?.error || 'Unknown image error');
+                setFailedAdImages((current) => ({ ...current, [imageKey]: true }));
+              }}
+            >
+              <View style={[styles.bannerShade, { backgroundColor: isDark ? 'rgba(13,22,16,0.82)' : 'rgba(255,255,255,0.84)' }]}>
+                <Text numberOfLines={1} style={[styles.businessName, { color: isDark ? '#f0f6f1' : '#26382b' }]}>{ad.businessName}</Text>
+                <Text numberOfLines={2} style={[styles.bannerTitle, { color: isDark ? '#e0e9e1' : '#58655b' }]}>{ad.title}</Text>
+                <Text numberOfLines={2} style={[styles.bannerDescription, { color: isDark ? '#d7e2d9' : '#465249' }]}>{ad.description}</Text>
+              </View>
+            </AdvertImage>
+          </View>
+        ) : (
+          <View style={styles.bannerFallback}>
+            <Text style={styles.businessName}>{ad.businessName}</Text>
+            <Text style={styles.bannerTitle}>{ad.title}</Text>
+            <Text style={styles.bannerDescription}>{ad.description}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   const visitBusiness = () => {
     const url = selectedAd?.linkUrl;
@@ -251,7 +344,6 @@ export default function HomeDashboard({ navigation }) {
                 </View>
                 <View style={styles.summaryFooter}>
                   <Text style={[styles.footerActivity, { color: palette.textMuted }]}>{periodTransactions.length} transaction{periodTransactions.length === 1 ? '' : 's'} in {periodLabel.toLowerCase()}</Text>
-                  <Text style={[styles.autoSlideLabel, { color: palette.textMuted }]}>AUTO SLIDE</Text>
                 </View>
               </Animated.View>
             </Card.Content>
@@ -280,67 +372,37 @@ export default function HomeDashboard({ navigation }) {
           ))}
         </View>
 
-        {!!visibleAds.length && (
-          <ScrollView
-            ref={carousel}
-            horizontal
-            pagingEnabled
-            snapToInterval={bannerWidth + 12}
-            decelerationRate="fast"
-            onMomentumScrollEnd={(event) => {
-              slideIndex.current = Math.round(
-                event.nativeEvent.contentOffset.x / (bannerWidth + 12),
-              );
-            }}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.carouselContent}
-          >
-            {visibleAds.map((ad) => {
-              const imageUrl = normalizeAdvertImageUrl(ad.imageUrl);
-              const imageKey = `${ad.id}:${ad.imageUrl}`;
-              const hasImage = Boolean(imageUrl) && !failedAdImages[imageKey];
-              return (
-              <TouchableOpacity
-                key={ad.id}
-                activeOpacity={0.94}
-                onPress={() => setSelectedAd(ad)}
-                style={[styles.banner, { width: bannerWidth, height: bannerHeight }]}
-                accessibilityLabel={`Advertisement: ${ad.businessName || ad.title}`}
+        {!!currentAd && (
+          <View style={[styles.adCarousel, { width: bannerWidth, height: bannerHeight }]}>
+            <Animated.View
+              pointerEvents="box-none"
+              style={[
+                styles.adSlide,
+                {
+                  width: bannerWidth,
+                  height: bannerHeight,
+                  transform: [{ translateX: advertTransition.interpolate({ inputRange: [0, 1], outputRange: [0, -bannerWidth] }) }],
+                },
+              ]}
+            >
+              {renderAdvertCard(currentAd)}
+            </Animated.View>
+            {!!nextAd && (
+              <Animated.View
+                pointerEvents="box-none"
+                style={[
+                  styles.adSlide,
+                  {
+                    width: bannerWidth,
+                    height: bannerHeight,
+                    transform: [{ translateX: advertTransition.interpolate({ inputRange: [0, 1], outputRange: [bannerWidth, 0] }) }],
+                  },
+                ]}
               >
-                <View style={styles.adLabel}><Text style={styles.adLabelText}>Ad</Text></View>
-                {hasImage ? (
-                  <View style={styles.bannerImageBackground}>
-                    <Image
-                      source={{ uri: imageUrl }}
-                      style={styles.bannerImage}
-                      resizeMode="cover"
-                      onError={(event) => { console.warn('[Advert image] Could not load', imageUrl, event?.nativeEvent?.error || 'Unknown image error'); setFailedAdImages((current) => ({ ...current, [imageKey]: true })); }}
-                    />
-                    <View style={[styles.bannerShade, { backgroundColor: isDark ? 'rgba(13,22,16,0.68)' : 'rgba(255,255,255,0.38)' }]}>
-                      <Text numberOfLines={1} style={[styles.businessName, { color: isDark ? '#f0f6f1' : '#26382b' }]}>
-                        {ad.businessName}
-                      </Text>
-                      <Text numberOfLines={2} style={[styles.bannerTitle, { color: isDark ? '#e0e9e1' : '#58655b' }]}>
-                        {ad.title}
-                      </Text>
-                      <Text numberOfLines={2} style={[styles.bannerDescription, { color: isDark ? '#d7e2d9' : '#465249' }]}>
-                        {ad.description}
-                      </Text>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={styles.bannerFallback}>
-                    <Text style={styles.businessName}>{ad.businessName}</Text>
-                    <Text style={styles.bannerTitle}>{ad.title}</Text>
-                    <Text style={styles.bannerDescription}>
-                      {ad.description}
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+                {renderAdvertCard(nextAd)}
+              </Animated.View>
+            )}
+          </View>
         )}
 
         <Portal>
@@ -349,15 +411,15 @@ export default function HomeDashboard({ navigation }) {
             onDismiss={() => setSelectedAd(null)}
             style={[styles.detailDialog, { backgroundColor: palette.surface }]}
           >
-            {normalizeAdvertImageUrl(selectedAd?.imageUrl) ? (
-              failedAdImages[`${selectedAd.id}:${selectedAd.imageUrl}`] ? (
+            {getAdvertImageUrl(selectedAd) ? (
+              failedAdImages[`${selectedAd.id}:${selectedAd.imageUrl || selectedAd.imageURL || selectedAd.image_url || selectedAd.image || ''}`] ? (
                 <View style={[styles.detailImageFallback, { backgroundColor: palette.surfaceAlt }]}><Text style={[styles.bannerDescription, { color: palette.textMuted }]}>Advert image unavailable.</Text></View>
               ) : (
-                <Image
-                  source={{ uri: normalizeAdvertImageUrl(selectedAd.imageUrl) }}
+                <AdvertImage
+                  uri={getAdvertImageUrl(selectedAd)}
                   style={styles.detailImage}
                   resizeMode="cover"
-                  onError={() => setFailedAdImages((current) => ({ ...current, [`${selectedAd.id}:${selectedAd.imageUrl}`]: true }))}
+                  onError={() => setFailedAdImages((current) => ({ ...current, [`${selectedAd.id}:${selectedAd.imageUrl || selectedAd.imageURL || selectedAd.image_url || selectedAd.image || ''}`]: true }))}
                 />
               )
             ) : null}
@@ -418,7 +480,6 @@ const styles = StyleSheet.create({
   slideDot: { height: 6, borderRadius: 4 },
   summaryFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
   footerActivity: { fontSize: 9 },
-  autoSlideLabel: { fontSize: 8, fontWeight: "800", letterSpacing: 1 },
   summaryTitle: {
     color: "#526557",
     fontSize: 12,
@@ -439,6 +500,8 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     marginBottom: 13,
   },
+  adCarousel: { overflow: 'hidden', position: 'relative', marginBottom: 12 },
+  adSlide: { position: 'absolute', left: 0, top: 0 },
   shortcut: {
     alignItems: "center",
     gap: 6,
@@ -461,12 +524,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#e7e9e6",
     elevation: 2,
   },
-  bannerImageBackground: { flex: 1, justifyContent: "flex-end" },
-  bannerImage: StyleSheet.absoluteFillObject,
-  bannerShade: { padding: 16, backgroundColor: "rgba(255, 255, 255, 0.46)" },
+  bannerImageBackground: { flex: 1, width: '100%', minHeight: 125, justifyContent: "flex-end" },
+  bannerShade: { paddingHorizontal: 16, paddingVertical: 13, backgroundColor: "rgba(255, 255, 255, 0.84)", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(30, 54, 38, 0.12)" },
   businessName: {
     color: "#26382b",
-    fontSize: 22,
+    fontSize: 19,
     fontWeight: "800",
     marginBottom: 4,
   },
@@ -476,7 +538,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 5,
   },
-  bannerDescription: { color: "#465249", fontSize: 13, lineHeight: 19 },
+  bannerDescription: { color: "#465249", fontSize: 11, lineHeight: 16 },
   bannerFallback: { flex: 1, justifyContent: "center", padding: 20, backgroundColor: "#e8eee9" },
   detailDialog: { borderRadius: 20, overflow: "hidden" },
   detailImage: { width: "100%", height: 190, backgroundColor: '#e7e9e6' },

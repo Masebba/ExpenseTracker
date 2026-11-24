@@ -1,0 +1,11 @@
+name: Publish FinanceTracker Android Production Update
+
+jobs:
+  publish_android_production:
+    name: Publish Android update to production
+    type: update
+    environment: production
+    params:
+      platform: android
+      channel: production
+      message: FinanceTracker Android production OTA update

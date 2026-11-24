@@ -71,7 +71,6 @@ export default function SignupScreen({ navigation }) {
         style={[styles.input, { backgroundColor: palette.surface }]}
         keyboardType="phone-pad"
       />
-      <Text style={[styles.accountDataNote, { color: palette.textMuted }]}>{detectedRegion ? `Detected region: ${regionName}` : `Region could not be detected; using ${regionName}`} · {detectedCurrency.code}. Currency and date/time follow this device’s region and time zone; no precise location access is used.</Text>
       <TextInput
         label="Email"
         value={email}
@@ -87,7 +86,9 @@ export default function SignupScreen({ navigation }) {
         style={[styles.input, { backgroundColor: palette.surface }]}
         right={
           <TextInput.Icon
-            name={passwordVisible ? "eye" : "eye-off"}
+            icon={passwordVisible ? "eye" : "eye-off"}
+            color={palette.text}
+            forceTextInputFocus={false}
             onPress={() => setPasswordVisible(!passwordVisible)}
           />
         }
@@ -100,7 +101,9 @@ export default function SignupScreen({ navigation }) {
         style={[styles.input, { backgroundColor: palette.surface }]}
         right={
           <TextInput.Icon
-            name={confirmPasswordVisible ? "eye" : "eye-off"}
+            icon={confirmPasswordVisible ? "eye" : "eye-off"}
+            color={palette.text}
+            forceTextInputFocus={false}
             onPress={() => setConfirmPasswordVisible(!confirmPasswordVisible)}
           />
         }
@@ -108,7 +111,6 @@ export default function SignupScreen({ navigation }) {
       <Button mode="contained" onPress={handleSignup} style={styles.button}>
         Sign Up
       </Button>
-      <Text style={[styles.accountDataNote, { color: palette.textMuted }]}>If you started a guest ledger on this device, creating an account copies it into this account's local records. Existing account records with matching IDs are kept.</Text>
       {!!guestTransferError && <Text accessibilityRole="alert" style={styles.accountDataError}>{guestTransferError}</Text>}
       <TouchableOpacity onPress={() => navigation.navigate('Login')}>
         <Text style={[styles.link, { color: palette.primary }]}>Already have an account? Log In</Text>

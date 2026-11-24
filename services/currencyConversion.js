@@ -2,6 +2,7 @@ const RATE_API_URL = 'https://open.er-api.com/v6/latest/USD';
 const FRESH_RATE_AGE_MS = 12 * 60 * 60 * 1000;
 const MAX_RATE_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_STALE_OFFLINE_RATE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const RATE_REQUEST_TIMEOUT_MS = 12000;
 const pendingRates = new Map();
 
 const cacheKey = (baseCurrencyCode, targetCurrencyCode) =>
@@ -44,7 +45,17 @@ const calculateExchangeRate = (rates, baseCurrencyCode, targetCurrencyCode) => {
 };
 
 const fetchUsdRates = async (fetchImpl) => {
-  const response = await fetchImpl(RATE_API_URL);
+  const controller = typeof AbortController === 'undefined' ? null : new AbortController();
+  const timeout = controller ? setTimeout(() => controller.abort(), RATE_REQUEST_TIMEOUT_MS) : null;
+  let response;
+  try {
+    response = await fetchImpl(RATE_API_URL, controller ? { signal: controller.signal } : undefined);
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('Exchange-rate request timed out.');
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
   if (!response.ok) throw new Error(`Exchange-rate service returned ${response.status}.`);
   const data = await response.json();
   if (data?.result !== 'success' || !data.rates || !Number.isFinite(Number(data.time_last_update_unix))) {

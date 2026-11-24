@@ -6,10 +6,10 @@ const THEME_KEY = 'expenseTracker.uiTheme';
 export const lightPalette = {
   mode: 'light', dark: false,
   // Brighter emerald-green identity with enough depth for white header text.
-  primary: '#268451', primaryStrong: '#1F7044',
+  primary: '#32A060', primaryStrong: '#279257',
   background: '#F3F9F4', surface: '#FFFFFF', surfaceAlt: '#DDEFE3',
   text: '#20372A', textMuted: '#65796B', border: '#BFD7C6',
-  input: '#F7FBF8', header: '#267F4D', headerText: '#FFFFFF',
+  input: '#F7FBF8', header: '#2B965B', headerText: '#FFFFFF',
   tabBar: '#FFFFFF', icon: '#268451', danger: '#B94F46',
   income: '#23834D', expense: '#C05B50', shadow: '#10261A',
 };

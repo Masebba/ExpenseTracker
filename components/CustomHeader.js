@@ -129,35 +129,34 @@ export default function CustomHeader() {
           </TouchableOpacity>
           <View style={styles.nameBox}>
             <Text numberOfLines={1} style={[styles.name, { color: palette.headerText }]}>{name}</Text>
-            <Text numberOfLines={1} style={[styles.workspaceRole, { color: palette.headerText }]}>{personal ? (guestMode ? 'Guest account · Saved on this device' : 'Personal account · Private ledger') : (activeWorkspace?.role ? `${activeWorkspace.role} workspace` : 'Business workspace')}</Text>
+            <Text numberOfLines={1} style={[styles.workspaceRole, { color: palette.headerText }]}>{personal ? (guestMode ? 'Guest account · Saved on this device' : 'Private ledger') : (activeWorkspace?.role ? `${activeWorkspace.role} workspace` : 'Business workspace')}</Text>
           </View>
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity onPress={openSalesScanner} style={styles.actionButton} accessibilityRole="button" accessibilityLabel="Quick sale, open sales scanner">
-            <MaterialCommunityIcons name="barcode-scan" size={22} color={palette.headerText} />
+            <MaterialCommunityIcons name="barcode-scan" size={20} color={palette.headerText} />
           </TouchableOpacity>
           <TouchableOpacity onPress={openNotifications} style={styles.actionButton} accessibilityRole="button" accessibilityLabel={`Notifications. ${unreadCount} unread`}>
-            <MaterialCommunityIcons name="bell-outline" size={22} color={palette.headerText} />
+            <MaterialCommunityIcons name="bell-outline" size={20} color={palette.headerText} />
             {unreadCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text></View>}
           </TouchableOpacity>
           <Menu
             visible={menuVisible}
             onDismiss={() => setMenuVisible(false)}
-            anchor={<TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.actionButton} accessibilityRole="button" accessibilityLabel="More options"><MaterialCommunityIcons name="dots-vertical" size={25} color={palette.headerText} /></TouchableOpacity>}
+            anchor={<TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.actionButton} accessibilityRole="button" accessibilityLabel="More options"><MaterialCommunityIcons name="dots-vertical" size={21} color={palette.headerText} /></TouchableOpacity>}
             contentStyle={[styles.menu, { backgroundColor: palette.surface }]}
           >
-            <Menu.Item leadingIcon="account-edit-outline" title="Update profile details" onPress={() => openSettingsSection('profile')} titleStyle={{ color: palette.text }} />
-            <Menu.Item leadingIcon="cash-multiple" title="Change currency" onPress={() => openSettingsSection('currency')} titleStyle={{ color: palette.text }} />
-            <Menu.Item leadingIcon="database-cog-outline" title="Data storage and recovery" onPress={() => openSettingsSection('data')} titleStyle={{ color: palette.text }} />
-            <Menu.Item leadingIcon="file-document-outline" title="Terms of Service" onPress={() => openSettingsSection('terms')} titleStyle={{ color: palette.text }} />
-            <Menu.Item leadingIcon="help-circle-outline" title="Help Centre" onPress={openHelp} titleStyle={{ color: palette.text }} />
+            <Menu.Item dense title="Update profile details" onPress={() => openSettingsSection('profile')} titleStyle={{ color: palette.text, fontSize: 13 }} />
+            <Menu.Item dense title="Change currency" onPress={() => openSettingsSection('currency')} titleStyle={{ color: palette.text, fontSize: 13 }} />
+            <Menu.Item dense title="Data storage and recovery" onPress={() => openSettingsSection('data')} titleStyle={{ color: palette.text, fontSize: 13 }} />
+            <Menu.Item dense title="Terms of Service" onPress={() => openSettingsSection('terms')} titleStyle={{ color: palette.text, fontSize: 13 }} />
+            <Menu.Item dense title="Help Centre" onPress={openHelp} titleStyle={{ color: palette.text, fontSize: 13 }} />
             <Divider style={{ backgroundColor: palette.border, marginVertical: 4 }} />
-            <Menu.Item leadingIcon={isDark ? 'weather-sunny' : 'moon-waning-crescent'} title={isDark ? 'Switch to light mode' : 'Switch to dark mode'} onPress={() => { setMenuVisible(false); setDarkMode(!isDark); }} titleStyle={{ color: palette.text }} />
-            <Menu.Item leadingIcon="account-cog-outline" title="Notification settings" onPress={() => openSettingsSection('notifications')} titleStyle={{ color: palette.text }} />
-            <Menu.Item leadingIcon="cog-outline" title="All settings" onPress={() => openSettingsSection('appearance')} titleStyle={{ color: palette.text }} />
+            <Menu.Item dense title={isDark ? 'Switch to light mode' : 'Switch to dark mode'} onPress={() => { setMenuVisible(false); setDarkMode(!isDark); }} titleStyle={{ color: palette.text, fontSize: 13 }} />
+            <Menu.Item dense title="Notification settings" onPress={() => openSettingsSection('notifications')} titleStyle={{ color: palette.text, fontSize: 13 }} />
+            <Menu.Item dense title="All settings" onPress={() => openSettingsSection('appearance')} titleStyle={{ color: palette.text, fontSize: 13 }} />
             <Divider style={{ backgroundColor: palette.border, marginVertical: 4 }} />
-            {user && <Menu.Item leadingIcon="account-remove-outline" title="Delete account" onPress={() => openSettingsSection('delete')} titleStyle={{ color: palette.danger }} />}
-            <Menu.Item leadingIcon="logout" title={guestMode ? 'Exit guest mode' : 'Sign out'} onPress={confirmSignOut} titleStyle={{ color: palette.danger }} />
+            <Menu.Item dense title={guestMode ? 'Exit guest mode' : 'Sign out'} onPress={confirmSignOut} titleStyle={{ color: palette.danger, fontSize: 13 }} />
           </Menu>
         </View>
       </View>
@@ -193,8 +192,8 @@ const styles = StyleSheet.create({
   nameBox: { flex: 1, minWidth: 0 },
   name: { maxWidth: '100%', fontSize: 12, marginTop: 2, fontWeight: '600' },
   workspaceRole: { fontSize: 9, opacity: 0.8, marginTop: 1, textTransform: 'capitalize' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 6 },
-  actionButton: { height: 38, width: 34, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.13)' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 2, marginLeft: 4 },
+  actionButton: { height: 34, width: 30, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.13)' },
   badge: { position: 'absolute', right: -1, top: -1, minWidth: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#c74632' },
   badgeText: { color: 'white', fontSize: 9, fontWeight: '700' },
   menu: { borderRadius: 16, maxWidth: 320 },
